@@ -340,12 +340,14 @@ impl ServerPlayers {
 /// Each tool is placed into its own slot; the pickaxe is in slot 0
 /// so it is selected by default.
 fn grant_starter_items(entities: &mut Entities, player_entity: hecs::Entity, items: &Items) -> Result<()> {
-    let starter_slots = [("pickaxe", 0usize), ("shovel", 1usize), ("axe", 2usize), ("hammer", 3usize)];
+    let starter_slots = [("pickaxe", 0usize), ("shovel", 1usize), ("hatchet", 2usize), ("hammer", 3usize)];
     let mut inventory = entities.ecs.get::<&mut Inventory>(player_entity)?;
 
     for (item_name, slot) in starter_slots {
-        let item = items.get_item_type_by_name(item_name)?;
-        inventory.set_item(slot, Some(ItemStack::new(item.get_id(), 1)))?;
+        // best-effort per item: an unknown name just skips that slot
+        if let Ok(item) = items.get_item_type_by_name(item_name) {
+            inventory.set_item(slot, Some(ItemStack::new(item.get_id(), 1)))?;
+        }
     }
     inventory.has_changed = true;
 
