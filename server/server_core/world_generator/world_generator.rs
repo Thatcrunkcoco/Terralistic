@@ -406,6 +406,7 @@ impl WorldGenerator {
         let wood = b("wood");
         let branch = b("branch");
         let leaves = b("leaves");
+        let canopy = b("canopy");
         let stone = b("stone");
         let stone_block = b("stone_block");
         let copper = b("copper_ore");
@@ -434,7 +435,7 @@ impl WorldGenerator {
 
         // --- A few trees along the surface for decoration. ---
         for x in (20..width - 20).step_by(24) {
-            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves);
+            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
         // --- Clearly separated, labeled test sections. ---
@@ -449,7 +450,7 @@ impl WorldGenerator {
 
         // --- Fill the remaining span with trees so it never looks empty. ---
         for x in (cursor..width - 8).step_by(20) {
-            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves);
+            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
         blocks.create_from_block_ids(&block_terrain)?;
@@ -514,21 +515,33 @@ fn place_test_label(
     *cursor += 6;
 }
 
-/// Place a simple deterministic tree rooted at the surface.
-fn place_test_tree(terrain: &mut Vec<Vec<BlockId>>, x: i32, surface_y: i32, width: i32, height: i32, wood: BlockId, branch: BlockId, leaves: BlockId) {
-    let trunk_top = surface_y - 8;
+/// Place a tree matching the normal world's appearance: a wood trunk with
+/// branch/leaves on the sides and a big bushy canopy block crowning the top.
+fn place_test_tree(terrain: &mut Vec<Vec<BlockId>>, x: i32, surface_y: i32, width: i32, height: i32, wood: BlockId, branch: BlockId, leaves: BlockId, canopy: BlockId) {
+    let tree_height = 8;
+    let trunk_top = surface_y - tree_height;
+
+    // trunk
     for y in trunk_top..=surface_y {
         tset(terrain, x, y, width, height, wood);
     }
-    // canopy rows
-    for dy in 1..=3 {
-        let row_y = trunk_top - dy;
-        tset(terrain, x - 1, row_y, width, height, branch);
-        tset(terrain, x + 1, row_y, width, height, branch);
-        tset(terrain, x - 2, row_y, width, height, leaves);
-        tset(terrain, x + 2, row_y, width, height, leaves);
+
+    // side wood branches at the top
+    tset(terrain, x - 1, trunk_top, width, height, wood);
+    tset(terrain, x + 1, trunk_top, width, height, wood);
+
+    // branch + leaves columns going up on both sides
+    let mut ly = trunk_top - 2;
+    while ly > trunk_top - 6 {
+        tset(terrain, x - 1, ly, width, height, branch);
+        tset(terrain, x - 2, ly, width, height, leaves);
+        tset(terrain, x + 1, ly, width, height, branch);
+        tset(terrain, x + 2, ly, width, height, leaves);
+        ly -= 2;
     }
-    tset(terrain, x, trunk_top - 3, width, height, leaves);
+
+    // bushy green crown (the 5x5 canopy multiblock) at the top
+    tset(terrain, x - 2, trunk_top - 5, width, height, canopy);
 }
 
 /// A tall tower of stone blocks to test vertical mining/climbing.
