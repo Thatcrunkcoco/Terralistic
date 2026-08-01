@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use hecs::Entity;
 
 use crate::client::game::camera::Camera;
-use crate::client::game::networking::ClientNetworking;
+use crate::client::game::networking::{ClientNetworking, WelcomePacketEvent};
 use crate::libraries::events::Event;
 use crate::libraries::graphics as gfx;
 use crate::shared::blocks::{Blocks, BLOCK_WIDTH, RENDER_BLOCK_WIDTH, RENDER_SCALE};
@@ -128,6 +128,17 @@ impl ClientPlayers {
     }
 
     pub fn on_event(&mut self, event: &Event, entities: &mut Entities) -> Result<()> {
+        if let Some(packet_event) = event.downcast::<WelcomePacketEvent>() {
+            let packet = &packet_event.packet;
+            if let Some(packet) = packet.try_deserialize::<PlayerSpawnPacket>() {
+                let player = spawn_player(entities, packet.x, packet.y, &packet.name, packet.id, HealthComponent::new(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH))?;
+                if packet.name == self.main_player_name {
+                    self.main_player = Some(player);
+                    self.waiting_for_player = false;
+                }
+            }
+        }
+
         if let Some(packet_event) = event.downcast::<Packet>() {
             if let Some(packet) = packet_event.try_deserialize::<PlayerSpawnPacket>() {
                 let player = spawn_player(entities, packet.x, packet.y, &packet.name, packet.id, HealthComponent::new(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH))?;

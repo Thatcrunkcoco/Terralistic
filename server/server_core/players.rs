@@ -13,7 +13,7 @@ use crate::shared::blocks::Blocks;
 use crate::shared::entities::{Entities, EntityPositionVelocityPacket, HealthChangeEvent, PhysicsComponent, PositionComponent};
 use crate::shared::entities::{HealthChangePacket, HealthComponent};
 use crate::shared::inventory::{Inventory, InventoryCraftPacket, InventoryPacket, InventorySelectPacket, InventorySwapPacket, Slot};
-use crate::shared::items::Items;
+use crate::shared::items::{Items, ItemStack};
 use crate::shared::packet::Packet;
 use crate::shared::players::{
     remove_all_picked_items, spawn_player, update_players_ms, PlayerComponent, PlayerMovingPacketToClient, PlayerMovingPacketToServer, PlayerPositionPacketToServer, PlayerSpawnPacket, RespawnPacket,
@@ -150,13 +150,13 @@ impl ServerPlayers {
         }
 
         if packet_event.packet.try_deserialize::<RespawnPacket>().is_some() {
-            self.spawn_player(&networking.get_connection_name(&packet_event.conn), &blocks.get_blocks(), entities, networking, &packet_event.conn)?;
+            self.spawn_player(&networking.get_connection_name(&packet_event.conn), &blocks.get_blocks(), entities, networking, &packet_event.conn, items)?;
         }
 
         Ok(())
     }
 
-    fn spawn_player(&mut self, name: &String, blocks: &Blocks, entities: &mut Entities, networking: &mut ServerNetworking, connection: &Connection) -> Result<()> {
+    fn spawn_player(&mut self, name: &String, blocks: &Blocks, entities: &mut Entities, networking: &mut ServerNetworking, connection: &Connection, items: &Items) -> Result<()> {
         let player_data = self.saved_players.get(name);
 
         let (spawn_x, spawn_y) = player_data.map_or_else(|| Self::get_spawn_coords(blocks), |player_data| (player_data.position.x(), player_data.position.y()));
@@ -186,17 +186,22 @@ impl ServerPlayers {
             name: name.clone(),
         })?;
 
-        let health_component = entities.ecs.get::<&mut HealthComponent>(player_entity)?;
-        let health_packet = Packet::new(HealthChangePacket {
-            health: health_component.health(),
-            max_health: health_component.max_health(),
-        })?;
+        let health_packet = {
+            let health_component = entities.ecs.get::<&HealthComponent>(player_entity)?;
+            Packet::new(HealthChangePacket {
+                health: health_component.health(),
+                max_health: health_component.max_health(),
+            })?
+        };
         networking.send_packet(&health_packet, SendTarget::Connection(connection.clone()))?;
 
         if let Some(player_data) = player_data {
             let mut inventory = entities.ecs.get::<&mut Inventory>(player_entity)?;
             *inventory = player_data.inventory.clone();
             inventory.has_changed = true;
+        } else {
+            let _ = grant_starter_items(entities, player_entity, items);
+            // best-effort: if starter items can't be granted, the player still spawns
         }
 
         networking.send_packet(&player_spawn_packet, SendTarget::All)?;
@@ -228,7 +233,7 @@ impl ServerPlayers {
 
         if let Some(new_connection_event) = event.downcast::<NewConnectionWelcomedEvent>() {
             let name = networking.get_connection_name(&new_connection_event.conn);
-            self.spawn_player(&name, &blocks.get_blocks(), entities, networking, &new_connection_event.conn)?;
+            self.spawn_player(&name, &blocks.get_blocks(), entities, networking, &new_connection_event.conn, items)?;
         }
 
         if let Some(disconnect_event) = event.downcast::<DisconnectEvent>() {
@@ -329,4 +334,20 @@ impl ServerPlayers {
         self.saved_players = bincode::deserialize(data)?;
         Ok(())
     }
+}
+
+/// Give a brand new player their starting tools.
+/// Each tool is placed into its own slot; the pickaxe is in slot 0
+/// so it is selected by default.
+fn grant_starter_items(entities: &mut Entities, player_entity: hecs::Entity, items: &Items) -> Result<()> {
+    let starter_slots = [("pickaxe", 0usize), ("shovel", 1usize), ("axe", 2usize), ("hammer", 3usize)];
+    let mut inventory = entities.ecs.get::<&mut Inventory>(player_entity)?;
+
+    for (item_name, slot) in starter_slots {
+        let item = items.get_item_type_by_name(item_name)?;
+        inventory.set_item(slot, Some(ItemStack::new(item.get_id(), 1)))?;
+    }
+    inventory.has_changed = true;
+
+    Ok(())
 }
