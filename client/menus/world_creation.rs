@@ -119,7 +119,10 @@ impl WorldCreationMenu {
         menu_back.set_back_rect_width(MENU_WIDTH, true);
         menu_back.update(graphics, &gfx::Container::default(graphics));
 
-        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), self.settings.clone(), self.global_settings.clone()) {
+        let name = self.world_name_input.get_text().clone();
+        let seed = self.world_seed_input.get_text().parse::<u64>().unwrap_or(0);
+
+        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), seed, name, self.settings.clone(), self.global_settings.clone()) {
             self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
         }
 

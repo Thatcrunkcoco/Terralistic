@@ -9,13 +9,14 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::libraries::events::EventManager;
+use crate::libraries::events::{Event, EventManager};
 use crate::server::server_core::chat::server_chat_on_event;
 use crate::server::server_core::entities::ServerEntities;
 use crate::server::server_core::items::ServerItems;
 use crate::server::server_core::networking::{DisconnectEvent, NewConnectionEvent};
 use crate::server::server_core::players::ServerPlayers;
 use crate::server::server_ui::{ConsoleMessageType, PlayerEventType, ServerState, UiMessageType};
+use crate::shared::entities::{EntityId, HealthComponent, PositionComponent};
 
 use super::blocks::ServerBlocks;
 use super::commands::CommandManager;
@@ -40,6 +41,9 @@ pub struct Server {
     players: ServerPlayers,
     ui_event_receiver: Option<Receiver<UiMessageType>>,
     commands: CommandManager,
+    world_seed: u64,
+    world_name: String,
+    player_event_receiver: Option<Receiver<Event>>,
 }
 
 impl Server {
@@ -62,7 +66,17 @@ impl Server {
             players: ServerPlayers::new(),
             ui_event_receiver,
             commands,
+            world_seed: 423_657,
+            world_name: "server".to_owned(),
+            player_event_receiver: None,
         }
+    }
+
+    /// Sets the seed and world name used when generating a new world.
+    /// Called by the single player world-creation flow before the server starts.
+    pub fn set_world_params(&mut self, seed: u64, name: &str) {
+        self.world_seed = seed;
+        self.world_name = name.to_owned();
     }
 
     pub fn set_state(&self, server_state: ServerState) {
@@ -79,7 +93,70 @@ impl Server {
         self.mods.mod_manager.add_global_function("stop_server", move |_, ()| -> Result<_, rlua::Error> {
             *state.lock().unwrap_or_else(PoisonError::into_inner) = ServerState::Stopping;
             Ok(())
-        })
+        })?;
+
+        // Player helper bindings used by test/utility commands. Events produced
+        // here (e.g. health changes) are flushed back into the main event loop.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.player_event_receiver = Some(receiver);
+        let entities = self.entities.get_entities_arc();
+
+        let entities_clone = entities.clone();
+        self.mods.mod_manager.add_global_function("get_player_by_name", move |_lua, name: String| {
+            let entities = entities_clone.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut found = None;
+            for (entity, (player, _)) in &mut entities.ecs.query::<(&crate::shared::players::PlayerComponent, &PositionComponent)>() {
+                if player.get_name() == name {
+                    found = Some(entity);
+                    break;
+                }
+            }
+            if let Some(entity) = found {
+                let id = entities.get_id_from_entity(entity).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+                return Ok(Some(id));
+            }
+            Ok(None)
+        })?;
+
+        let entities_clone = entities.clone();
+        self.mods.mod_manager.add_global_function("get_player_position", move |_lua, entity_id: EntityId| {
+            let entities = entities_clone.lock().unwrap_or_else(PoisonError::into_inner);
+            let entity = entities
+                .get_entity_from_id(entity_id)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            let position = (*entities.ecs.get::<&PositionComponent>(entity).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?).clone();
+            Ok((position.x(), position.y()))
+        })?;
+
+        let entities_clone = entities.clone();
+        self.mods.mod_manager.add_global_function("set_player_position", move |_lua, (entity_id, x, y): (EntityId, f32, f32)| {
+            let mut entities = entities_clone.lock().unwrap_or_else(PoisonError::into_inner);
+            let entity = entities
+                .get_entity_from_id(entity_id)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            let position = entities.ecs.query_one_mut::<&mut PositionComponent>(entity).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            position.set_x(x);
+            position.set_y(y);
+            Ok(())
+        })?;
+
+        let entities_clone = entities.clone();
+        let event_sender = sender.clone();
+        self.mods.mod_manager.add_global_function("set_player_health", move |_lua, (entity_id, health): (EntityId, i32)| {
+            let mut entities = entities_clone.lock().unwrap_or_else(PoisonError::into_inner);
+            let entity = entities
+                .get_entity_from_id(entity_id)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            let health_component = entities.ecs.query_one_mut::<&mut HealthComponent>(entity).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            let mut events = EventManager::new();
+            health_component.set_health(health, &mut events, entity_id);
+            while let Some(event) = events.pop_event() {
+                event_sender.send(event).ok();
+            }
+            Ok(())
+        })?;
+
+        Ok(())
     }
 
     /// Starts the server - manual way. It only inits the server but doesn't run a loop
@@ -123,14 +200,30 @@ impl Server {
             self.load_world(world_path)?;
         } else {
             self.set_state(ServerState::GeneratingWorld);
-            generator.generate(
-                (&mut *self.blocks.get_blocks(), &mut self.walls.get_walls()),
-                &mut self.mods.mod_manager,
-                4400,
-                1200,
-                423_657,
-                status_text,
-            )?;
+
+            // A flat test world with trees and labeled test sections is produced for
+            // the reserved name "test" combined with seed 123. Everything else uses
+            // the normal noise-based generation.
+            let is_test_world = self.world_name == "test" && self.world_seed == 123;
+
+            if is_test_world {
+                generator.generate_test(
+                    (&mut *self.blocks.get_blocks(), &mut self.walls.get_walls()),
+                    &mut self.mods.mod_manager,
+                    4400,
+                    1200,
+                    status_text,
+                )?;
+            } else {
+                generator.generate(
+                    (&mut *self.blocks.get_blocks(), &mut self.walls.get_walls()),
+                    &mut self.mods.mod_manager,
+                    4400,
+                    1200,
+                    self.world_seed,
+                    status_text,
+                )?;
+            }
 
             let width = self.blocks.get_blocks().get_size().0;
             let height = self.blocks.get_blocks().get_size().1;
@@ -252,6 +345,12 @@ impl Server {
     }
 
     fn handle_events(&mut self) -> Result<()> {
+        if let Some(receiver) = &self.player_event_receiver {
+            while let Ok(event) = receiver.try_recv() {
+                self.events.push_event(event);
+            }
+        }
+
         if let Some(receiver) = &self.ui_event_receiver {
             //goes through the messages received from the server
             while let Ok(UiMessageType::UiToSrvConsoleMessage(message)) = receiver.try_recv() {

@@ -15,7 +15,7 @@ use crate::libraries::graphics as gfx;
 use crate::server::server_core::Server;
 use crate::server::server_core::SINGLEPLAYER_PORT;
 
-fn start_private_world_server(world_path: &Path) -> Result<(std::thread::JoinHandle<std::result::Result<(), anyhow::Error>>, Arc<AtomicBool>, Arc<Mutex<String>>)> {
+fn start_private_world_server(world_path: &Path, seed: u64, world_name: String) -> Result<(std::thread::JoinHandle<std::result::Result<(), anyhow::Error>>, Arc<AtomicBool>, Arc<Mutex<String>>)> {
     let server_running = Arc::new(AtomicBool::new(true));
     let server_running2 = server_running.clone();
 
@@ -26,6 +26,7 @@ fn start_private_world_server(world_path: &Path) -> Result<(std::thread::JoinHan
 
     let server_thread = std::thread::Builder::new().name("Private server".to_owned()).spawn(move || {
         let mut server = Server::new(SINGLEPLAYER_PORT, None, None);
+        server.set_world_params(seed, &world_name);
         let result = server.run(&server_running2, &loading_text2, vec![include_bytes!("../../base_game/base_game.mod").to_vec()], &world_path);
 
         if result.is_err() {
@@ -58,8 +59,8 @@ pub struct PrivateWorld {
 }
 
 impl PrivateWorld {
-    pub fn new(world_path: &Path, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>) -> Result<Self> {
-        let (server_thread, server_running, loading_text) = start_private_world_server(world_path)?;
+    pub fn new(world_path: &Path, seed: u64, world_name: String, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>) -> Result<Self> {
+        let (server_thread, server_running, loading_text) = start_private_world_server(world_path, seed, world_name)?;
         Ok(Self {
             server_thread: Some(server_thread),
             server_running,

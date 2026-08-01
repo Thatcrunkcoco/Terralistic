@@ -251,8 +251,7 @@ impl WorldGenerator {
     }
 
     #[allow(clippy::too_many_lines)] // TODO: split this function up
-    pub fn generate(&self, world: (&mut Blocks, &mut Walls), mods: &mut ModManager, min_width: i32, height: i32, seed: u64, status_text: &Mutex<String>) -> Result<()> {
-        let start_time = std::time::Instant::now();
+    pub fn generate(&self, world: (&mut Blocks, &mut Walls), mods: &mut ModManager, min_width: i32, height: i32, seed: u64, status_text: &Mutex<String>) -> Result<()> {        let start_time = std::time::Instant::now();
 
         let blocks = world.0;
         let walls = world.1;
@@ -378,5 +377,244 @@ impl WorldGenerator {
         }
 
         Ok(())
+    }
+}
+
+/// A special-purpose, fully deterministic "flat test world" created when the
+/// world is named "test" with seed 123. It has a flat grass surface with some
+/// trees and clearly separated, labeled test sections for exercising world
+/// features (building, mining, lighting, digging, etc.).
+impl WorldGenerator {
+    pub fn generate_test(&self, world: (&mut Blocks, &mut Walls), _mods: &mut ModManager, _min_width: i32, _height: i32, status_text: &Mutex<String>) -> Result<()> {
+        let blocks = world.0;
+        let walls = world.1;
+
+        // The test world is deliberately small so it loads instantly and every
+        // test section is within easy walking distance.
+        let width = 512i32;
+        let width_u = width as u32;
+        let height_u = 256u32;
+
+        // Rows at or below this index are filled ground; rows above are air.
+        let ground = 180i32;
+
+        // Resolve block/wall ids from the base game mod by name.
+        let b = |name: &str| blocks.get_block_id_by_name(name).unwrap_or_else(|_| blocks.air());
+        let air = b("air");
+        let dirt = b("dirt");
+        let grass = b("grass_block");
+        let wood = b("wood");
+        let branch = b("branch");
+        let leaves = b("leaves");
+        let stone = b("stone");
+        let stone_block = b("stone_block");
+        let copper = b("copper_ore");
+        let iron = b("iron_ore");
+        let tin = b("tin_ore");
+        let torch = b("torch");
+        let wood_planks = b("wood_planks");
+        let dirt_wall = walls.get_wall_id_by_name("dirt").unwrap_or(walls.clear);
+
+        println!("Creating a flat test world with size {width}x{height_u}");
+
+        *status_text.lock().unwrap_or_else(PoisonError::into_inner) = "Generating test world".to_owned();
+        blocks.create((width_u, height_u));
+        walls.create((width_u, height_u));
+
+        let mut block_terrain = vec![vec![air; height_u as usize]; width as usize];
+        let mut wall_terrain = vec![vec![walls.clear; height_u as usize]; width as usize];
+
+        // --- Flat ground: filled with dirt, grass on the surface. ---
+        for x in 0..width {
+            for y in ground..height_u as i32 {
+                block_terrain[x as usize][y as usize] = if y == ground { grass } else { dirt };
+                wall_terrain[x as usize][y as usize] = dirt_wall;
+            }
+        }
+
+        // --- A few trees along the surface for decoration. ---
+        for x in (20..width - 20).step_by(24) {
+            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves);
+        }
+
+        // --- Clearly separated, labeled test sections. ---
+        // A labeled sign is just a small stone pillar marker; the feature itself
+        // sits on the grass a couple blocks ahead so it is easy to walk up to.
+        let mut cursor = 24;
+        for (name, feature) in TEST_SECTIONS {
+            place_test_label(&mut block_terrain, &mut cursor, ground, width, height_u as i32, stone, name);
+            feature(&mut block_terrain, cursor, ground, height_u as i32, &SectionCtx { width, air, dirt, wood_planks, stone_block, copper, iron, tin, torch, stone });
+            cursor += 30;
+        }
+
+        // --- Fill the remaining span with trees so it never looks empty. ---
+        for x in (cursor..width - 8).step_by(20) {
+            place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves);
+        }
+
+        blocks.create_from_block_ids(&block_terrain)?;
+        walls.create_from_wall_ids(&wall_terrain)?;
+
+        println!("World generated in {}ms", std::time::Instant::now().elapsed().as_millis());
+        Ok(())
+    }
+}
+
+/// Block ids the test sections need.
+struct SectionCtx {
+    width: i32,
+    air: BlockId,
+    dirt: BlockId,
+    wood_planks: BlockId,
+    stone_block: BlockId,
+    copper: BlockId,
+    iron: BlockId,
+    tin: BlockId,
+    torch: BlockId,
+    stone: BlockId,
+}
+
+/// A test section is a named feature plus a builder that stamps it into the
+/// world at `x` (the left edge of the feature), with the surface at `ground`
+/// and the world `height` tall.
+type SectionBuilder = fn(&mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx);
+
+const TEST_SECTIONS: &[(&str, SectionBuilder)] = &[
+    ("pillar", build_pillar_section),
+    ("pit", build_pit_section),
+    ("mount", build_mount_section),
+    ("ores", build_ores_section),
+    ("platform", build_platform_section),
+    ("torches", build_torches_section),
+    ("house", build_house_section),
+    ("wall", build_wall_section),
+];
+
+/// Write `block` at (x, y) only if it is inside the world bounds.
+fn tset(terrain: &mut Vec<Vec<BlockId>>, x: i32, y: i32, width: i32, height: i32, block: BlockId) {
+    if x >= 0 && x < width && y >= 0 && y < height {
+        terrain[x as usize][y as usize] = block;
+    }
+}
+
+/// Place a small marker above the surface that reads as a label. We can't draw
+/// text, so we use a stone pillar to mark the start of each section.
+fn place_test_label(
+    terrain: &mut Vec<Vec<BlockId>>,
+    cursor: &mut i32,
+    ground: i32,
+    width: i32,
+    height: i32,
+    stone: BlockId,
+    _name: &str,
+) {
+    for h in ground - 5..ground {
+        tset(terrain, *cursor, h, width, height, stone);
+    }
+    *cursor += 6;
+}
+
+/// Place a simple deterministic tree rooted at the surface.
+fn place_test_tree(terrain: &mut Vec<Vec<BlockId>>, x: i32, surface_y: i32, width: i32, height: i32, wood: BlockId, branch: BlockId, leaves: BlockId) {
+    let trunk_top = surface_y - 8;
+    for y in trunk_top..=surface_y {
+        tset(terrain, x, y, width, height, wood);
+    }
+    // canopy rows
+    for dy in 1..=3 {
+        let row_y = trunk_top - dy;
+        tset(terrain, x - 1, row_y, width, height, branch);
+        tset(terrain, x + 1, row_y, width, height, branch);
+        tset(terrain, x - 2, row_y, width, height, leaves);
+        tset(terrain, x + 2, row_y, width, height, leaves);
+    }
+    tset(terrain, x, trunk_top - 3, width, height, leaves);
+}
+
+/// A tall tower of stone blocks to test vertical mining/climbing.
+fn build_pillar_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    let top = ground - 16;
+    for y in top..=ground {
+        for dx in 0..3 {
+            tset(terrain, x + dx, y, ctx.width, height, ctx.stone_block);
+        }
+    }
+}
+
+/// A pit dug into the ground to test digging downward.
+fn build_pit_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    let bottom = ground + 8;
+    for y in ground + 1..=bottom {
+        for dx in 0..4 {
+            tset(terrain, x + dx, y, ctx.width, height, ctx.air);
+        }
+    }
+    // floor of the pit
+    for dx in 0..4 {
+        tset(terrain, x + dx, bottom + 1, ctx.width, height, ctx.dirt);
+    }
+}
+
+/// A small mountain of stacked stone to test climbing/walking up slopes.
+fn build_mount_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    for step in 0..5 {
+        let level = ground - step;
+        for dx in 0..(5 - step) {
+            tset(terrain, x + dx, level, ctx.width, height, ctx.stone);
+        }
+    }
+}
+
+/// Columns of each ore type, embedded in stone, to test mining different ores.
+fn build_ores_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    let ores = [ctx.copper, ctx.iron, ctx.tin];
+    for (i, ore) in ores.iter().enumerate() {
+        for y in ground + 1..ground + 10 {
+            tset(terrain, x + i as i32, y, ctx.width, height, *ore);
+        }
+    }
+}
+
+/// A raised wooden platform/steps to test vertical building and jumping.
+fn build_platform_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    for step in 0..4 {
+        let level = ground - step;
+        for dx in 0..3 {
+            tset(terrain, x + dx, level, ctx.width, height, ctx.wood_planks);
+        }
+    }
+}
+
+/// A row of torches embedded in dirt to test light emission.
+fn build_torches_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    for i in 0..6 {
+        tset(terrain, x + i * 2, ground - 1, ctx.width, height, ctx.torch);
+    }
+}
+
+/// A small hollow house (wood planks with an air doorway) to test building.
+fn build_house_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    let wall_top = ground - 5;
+    // walls
+    for y in wall_top..=ground {
+        tset(terrain, x, y, ctx.width, height, ctx.wood_planks);
+        tset(terrain, x + 4, y, ctx.width, height, ctx.wood_planks);
+    }
+    // ceiling
+    for dx in 0..5 {
+        tset(terrain, x + dx, wall_top, ctx.width, height, ctx.wood_planks);
+    }
+    // doorway
+    tset(terrain, x + 4, ground, ctx.width, height, ctx.air);
+    tset(terrain, x + 4, ground - 1, ctx.width, height, ctx.air);
+}
+
+/// A tall vertical wall of stone to test tunneling through.
+fn build_wall_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
+    let top = ground - 12;
+    for y in top..=ground {
+        for dx in 0..2 {
+            tset(terrain, x + dx, y, ctx.width, height, ctx.stone_block);
+        }
     }
 }

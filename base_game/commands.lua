@@ -25,10 +25,13 @@ function command_give(arguments, executor)
     
     if #arguments >= 3 then
         player = terralistic_get_player_by_name(arguments[3])
+        if player == nil then
+            return "Player '" .. arguments[3] .. "' not found."
+        end
     end
     
     if player == nil then
-        return "Player '" .. arguments[3] .. "' not found."
+        return "No player specified."
     end
     
     terralistic_give_item(player, item, amount)
@@ -53,4 +56,107 @@ end
 
 function describe_command_stop()
     return "Stops the server."
+end
+
+function command_pos(arguments, executor)
+    if #arguments ~= 0 then
+        return "Command 'pos' does not take any arguments."
+    end
+    if executor == nil then
+        return "Command 'pos' must be run by a player."
+    end
+    x, y = terralistic_get_player_position(executor)
+    return "You are at x=" .. math.floor(x) .. ", y=" .. math.floor(y)
+end
+
+function describe_command_pos()
+    return [[Reports your position.
+Usage: pos]]
+end
+
+function command_tp(arguments, executor)
+    if #arguments ~= 2 and #arguments ~= 3 then
+        return "Usage: tp <x> <y> [player]"
+    end
+
+    target = executor
+    offset = 0
+    if #arguments == 3 then
+        target = terralistic_get_player_by_name(arguments[1])
+        offset = 1
+        if target == nil then
+            return "Player '" .. arguments[1] .. "' not found."
+        end
+    end
+    if target == nil then
+        return "No player specified."
+    end
+
+    x = tonumber(arguments[1 + offset])
+    y = tonumber(arguments[2 + offset])
+    if x == nil or y == nil then
+        return "Arguments must be numbers."
+    end
+
+    terralistic_set_player_position(target, x, y)
+    return "Teleported to x=" .. math.floor(x) .. ", y=" .. math.floor(y)
+end
+
+function describe_command_tp()
+    return [[Teleports a player to coordinates.
+Usage: tp <x> <y> [player] - player defaults to the executor.]]
+end
+
+function command_heal(arguments, executor)
+    if #arguments > 2 then
+        return "Usage: heal [amount] [player]"
+    end
+
+    target = executor
+    amount = 100
+    offset = 0
+    if #arguments >= 1 and tonumber(arguments[1]) ~= nil then
+        amount = tonumber(arguments[1])
+        health_arg = true
+    else
+        health_arg = false
+    end
+    if #arguments == 2 then
+        target = terralistic_get_player_by_name(arguments[2])
+        if target == nil then
+            return "Player '" .. arguments[2] .. "' not found."
+        end
+    elseif #arguments == 1 and not health_arg then
+        target = terralistic_get_player_by_name(arguments[1])
+        if target == nil then
+            return "Player '" .. arguments[1] .. "' not found."
+        end
+    end
+    if target == nil then
+        return "No player specified."
+    end
+
+    terralistic_set_player_health(target, amount)
+    return "Set health to " .. amount
+end
+
+function describe_command_heal()
+    return [[Sets a player's health.
+Usage: heal [amount] [player] - amount defaults to 100, player defaults to the executor.]]
+end
+
+function command_test(arguments, executor)
+    return [[Flat test world: you spawn near the middle. Walk WEST (toward x=0) to find the labeled sections in order:
+pillar - tower of stone blocks
+pit - a hole dug into the ground
+mount - small stone mountain
+ores - columns of copper/iron/tin ore
+platform - wooden steps
+torches - torch line (light test)
+house - small hollow wood house
+wall - a wall of stone to tunnel through]]
+end
+
+function describe_command_test()
+    return "Lists the test sections and where to find them."
 end

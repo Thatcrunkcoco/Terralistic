@@ -327,8 +327,11 @@ impl SingleplayerSelector {
             menu_back.set_back_rect_width(parent_container.rect.size.0, false);
             menu_back.update(graphics, &gfx::Container::default(graphics));
             menu_back.render_back(graphics);
-            if let Ok(menu) = PrivateWorld::new(self.world_list.worlds.get(world)?.get_file_path(), self.settings.clone(), self.global_settings.clone()) {
-                self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
+            {
+                let world = self.world_list.worlds.get(world)?;
+                if let Ok(menu) = PrivateWorld::new(world.get_file_path(), 0, world.name.clone(), self.settings.clone(), self.global_settings.clone()) {
+                    self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
+                }
             }
         } else if action == 1 {
             let path = self.world_list.worlds.get(world)?.get_file_path().clone();
