@@ -128,7 +128,14 @@ impl ServerPlayers {
                 let dx = packet.x - position.x();
                 let dy = packet.y - position.y();
                 let distance = dx * dx + dy * dy;
-                let tolerance = 2.0;
+
+                // The client reports its position roughly once a second. Fast movement
+                // (falling, jumping) covers a lot of ground in that time, so a fixed
+                // tolerance causes false "teleport" detections and rubber-banding.
+                // Scale the allowed distance by how far the player could plausibly
+                // have moved given their current speed, plus a fixed base and margin.
+                let speed = f32::hypot(velocity.velocity_x, velocity.velocity_y);
+                let tolerance = 2.0 + speed * 1.5;
 
                 if distance < tolerance * tolerance {
                     position.set_x(packet.x);
