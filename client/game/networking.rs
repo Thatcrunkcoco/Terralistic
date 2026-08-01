@@ -203,6 +203,10 @@ impl ClientNetworking {
     fn send_packet_internal(net_client: &NodeHandler<()>, packet: &Packet, endpoint: Endpoint) -> Result<()> {
         let packet_data = bincode::serialize(packet)?;
 
+        // Cap retries so a vanished server can't wedge the client networking
+        // thread (and its shutdown join) forever.
+        const MAX_RETRIES: u32 = 2000; // ~2s at 1ms per retry
+        let mut retries = 0;
         loop {
             let status = net_client.network().send(endpoint, &packet_data);
             match status {
@@ -214,6 +218,10 @@ impl ClientNetworking {
                     bail!("Resource not found");
                 }
                 SendStatus::ResourceNotAvailable => {
+                    retries += 1;
+                    if retries >= MAX_RETRIES {
+                        bail!("Failed to send packet: endpoint unavailable");
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(1));
                     // just try again
                 }

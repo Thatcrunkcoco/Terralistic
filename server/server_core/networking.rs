@@ -205,6 +205,12 @@ impl ServerNetworking {
     }
 
     fn send_packet_internal(net_server: &NodeHandler<()>, packet_data: &[u8], conn: &Connection) -> Result<()> {
+        // Cap how long we wait for a connection to become available so a peer
+        // that has gone away can't wedge the network loop (and therefore the
+        // shutdown join) forever, which previously caused the "Waiting for
+        // server" hang on exit.
+        const MAX_RETRIES: u32 = 2000; // ~2s at 1ms per retry
+        let mut retries = 0;
         loop {
             let status = net_server.network().send(conn.address, packet_data);
             match status {
@@ -212,6 +218,10 @@ impl ServerNetworking {
                 SendStatus::MaxPacketSizeExceeded => bail!("Max packet size exceeded"),
                 SendStatus::ResourceNotFound => bail!("Resource not found"),
                 SendStatus::ResourceNotAvailable => {
+                    retries += 1;
+                    if retries >= MAX_RETRIES {
+                        bail!("Failed to send packet: endpoint unavailable");
+                    }
                     // wait a bit and try again
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }

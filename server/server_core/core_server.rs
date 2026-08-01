@@ -245,12 +245,25 @@ impl Server {
     pub fn run(&mut self, is_running: &AtomicBool, status_text: &Mutex<String>, mods_serialized: Vec<Vec<u8>>, world_path: &Path) -> Result<()> {
         let mut last_time;
 
-        self.start(status_text, mods_serialized, world_path)?;
+        // Capture the first error but always tear down, so the networking loop is
+        // joined and the status/loading text is cleared. Skipping stop() here was
+        // a cause of the "Waiting for server" hang and the closed-channel errors.
+        let mut result = self.start(status_text, mods_serialized, world_path);
+        if result.is_err() {
+            // best-effort teardown so resources are released even on startup failure
+            let _ = self.stop(status_text, world_path);
+            return result;
+        }
 
         loop {
             last_time = std::time::Instant::now();
 
-            self.update()?;
+            if let Err(e) = self.update() {
+                if result.is_ok() {
+                    result = Err(e);
+                }
+                break;
+            }
 
             // sleep
             let sleep_time = 1000.0 / self.tps_limit - last_time.elapsed().as_secs_f32() * 1000.0;
@@ -264,9 +277,13 @@ impl Server {
             }
         }
 
-        self.stop(status_text, world_path)?;
+        if let Err(e) = self.stop(status_text, world_path) {
+            if result.is_ok() {
+                result = Err(e);
+            }
+        }
 
-        Ok(())
+        result
     }
 
     /// Updates the server - manual way. It updates the server once and returns

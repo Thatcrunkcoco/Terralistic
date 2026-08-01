@@ -133,6 +133,11 @@ impl Menu for PrivateWorld {
                         }
                     }
 
+                    // Once the server thread has finished, clear the loading text so
+                    // the "Waiting for server" screen can always close (it may have
+                    // been set by an error path where the server already stopped).
+                    self.loading_text.lock().unwrap_or_else(PoisonError::into_inner).clear();
+
                     self.state = PrivateWorldState::Stopped;
                 }
                 None
