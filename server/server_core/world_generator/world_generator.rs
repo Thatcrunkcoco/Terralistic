@@ -133,17 +133,23 @@ impl WorldGenerator {
         Ok(ores_perlin_noises)
     }
 
+    /// Compute the terrain surface height for a column, given the turbulence
+    /// value at that column. Pure so it can be unit tested.
+    fn terrain_height(noise_turbulence: f32, min_h: f32, max_h: f32, amplitude: f32, world_height: i32) -> i32 {
+        ((noise_turbulence + 1.0) * (max_h - min_h) * amplitude) as i32 + min_h as i32 + world_height * 2 / 3
+    }
+
     /// This function generates the heights of the terrain.
-    fn generate_heights(rng: &mut StdRng, width: i32, height: i32, min_heights: &[f32], max_heights: &[f32]) -> Result<Vec<i32>> {
+    fn generate_heights(rng: &mut StdRng, width: i32, height: i32, min_heights: &[f32], max_heights: &[f32], amplitudes: &[f32], frequencies: &[f32]) -> Result<Vec<i32>> {
         let terrain_noise = Perlin::new(rng.next_u32());
         let mut heights = Vec::new();
         for x in 0..width {
-            let terrain_noise_val = ((turbulence(&terrain_noise, x as f32 / 150.0, 0.0) + 1.0)
-                * (max_heights.get(x as usize).ok_or_else(|| anyhow!("invalid x coordinate"))? - min_heights.get(x as usize).ok_or_else(|| anyhow!("invalid block id"))?))
-                as i32
-                + *min_heights.get(x as usize).ok_or_else(|| anyhow!("invalid block id"))? as i32
-                + height * 2 / 3;
-            heights.push(terrain_noise_val);
+            let amplitude = *amplitudes.get(x as usize).ok_or_else(|| anyhow!("invalid x coordinate"))?;
+            let frequency = *frequencies.get(x as usize).ok_or_else(|| anyhow!("invalid x coordinate"))?;
+            let turbulence_val = turbulence(&terrain_noise, x as f32 / frequency, 0.0);
+            let min_h = *min_heights.get(x as usize).ok_or_else(|| anyhow!("invalid x coordinate"))?;
+            let max_h = *max_heights.get(x as usize).ok_or_else(|| anyhow!("invalid x coordinate"))?;
+            heights.push(Self::terrain_height(turbulence_val, min_h, max_h, amplitude, height));
         }
         Ok(heights)
     }
@@ -266,6 +272,8 @@ impl WorldGenerator {
 
         let mut min_heights = Vec::new();
         let mut max_heights = Vec::new();
+        let mut amplitudes = Vec::new();
+        let mut frequencies = Vec::new();
 
         println!("Creating a world with size {width}x{height}");
 
@@ -275,6 +283,8 @@ impl WorldGenerator {
             let biome = biomes.get(*biome_id as usize).ok_or_else(|| anyhow!("Biome with id {} does not exist!", *biome_id))?;
             min_heights.push(biome.min_terrain_height as f32);
             max_heights.push(biome.max_terrain_height as f32);
+            amplitudes.push(biome.terrain_amplitude);
+            frequencies.push(biome.terrain_frequency);
         }
 
         // tasks are for loading bar
@@ -304,6 +314,8 @@ impl WorldGenerator {
             max_heights = convolve(&max_heights, convolution_size);
             min_cave_thresholds = convolve(&min_cave_thresholds, convolution_size);
             max_cave_thresholds = convolve(&max_cave_thresholds, convolution_size);
+            amplitudes = convolve(&amplitudes, convolution_size);
+            frequencies = convolve(&frequencies, convolution_size);
         }
 
         let cave_noise = Perlin::new(rng.next_u32());
@@ -312,7 +324,7 @@ impl WorldGenerator {
         let mut curr_heights = Vec::new();
         let mut prev_x = 0;
 
-        let heights = Self::generate_heights(&mut rng, width, height, &min_heights, &max_heights)?;
+        let heights = Self::generate_heights(&mut rng, width, height, &min_heights, &max_heights, &amplitudes, &frequencies)?;
 
         for x in 0..width {
             next_task();
@@ -629,5 +641,47 @@ fn build_wall_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, heig
         for dx in 0..3 {
             tset(terrain, x + dx, y, ctx.width, height, ctx.stone_block);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorldGenerator;
+
+    /// Helper to call the private pure function.
+    fn height(turbulence: f32, min: f32, max: f32, amplitude: f32, world_height: i32) -> i32 {
+        WorldGenerator::terrain_height(turbulence, min, max, amplitude, world_height)
+    }
+
+    #[test]
+    fn amplitude_zero_is_flat_at_min() {
+        // amplitude 0 produces a perfectly flat surface at min + bias,
+        // regardless of turbulence or max height.
+        let bias = 100 * 2 / 3;
+        assert_eq!(height(0.0, 10.0, 50.0, 0.0, 100), 10 + bias);
+        assert_eq!(height(2.0, 10.0, 50.0, 0.0, 100), 10 + bias);
+        assert_eq!(height(-1.0, 30.0, 400.0, 0.0, 200), 30 + 200 * 2 / 3);
+    }
+
+    #[test]
+    fn amplitude_one_matches_original_formula() {
+        // amplitude 1.0 reproduces the historical formula exactly.
+        // (turbulence + 1) ranges 0..2, so turbulence -1 sits at min + bias
+        // and turbulence +1 reaches 2*(max-min) + min + bias.
+        let world_h = 100;
+        let bias = world_h * 2 / 3;
+        assert_eq!(height(-1.0, 10.0, 50.0, 1.0, world_h), 10 + bias);
+        assert_eq!(height(1.0, 10.0, 50.0, 1.0, world_h), 2 * (50 - 10) + 10 + bias);
+        assert_eq!(height(0.0, 10.0, 50.0, 1.0, world_h), (50 - 10) + 10 + bias);
+    }
+
+    #[test]
+    fn higher_amplitude_raises_terrain() {
+        // increasing amplitude monotonically raises the surface.
+        let flat_amp = height(0.5, 0.0, 100.0, 0.0, 100);
+        let half = height(0.5, 0.0, 100.0, 0.5, 100);
+        let full = height(0.5, 0.0, 100.0, 1.0, 100);
+        assert!(flat_amp < half);
+        assert!(half < full);
     }
 }

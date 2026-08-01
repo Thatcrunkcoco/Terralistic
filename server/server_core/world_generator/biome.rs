@@ -14,6 +14,12 @@ pub(super) struct Biome {
     pub max_width: u32,
     pub min_terrain_height: u32,
     pub max_terrain_height: u32,
+    // How strongly terrain rises from min_terrain_height toward max_terrain_height.
+    // 1.0 = the full min..max range; 0.0 produces flat terrain at min_terrain_height.
+    pub terrain_amplitude: f32,
+    // Wavelength (noise divisor) for terrain height. Smaller = more frequent hills,
+    // larger = broader rolling terrain. 150.0 is the historical default.
+    pub terrain_frequency: f32,
     pub base_block: BlockId,
     pub base_wall: WallId,
     // the first element is connection weight, the second is the biome id
@@ -30,6 +36,8 @@ impl Biome {
             max_width: 0,
             min_terrain_height: 0,
             max_terrain_height: 0,
+            terrain_amplitude: 1.0,
+            terrain_frequency: 150.0,
             base_block: BlockId::undefined(),
             base_wall: WallId::undefined(),
             adjacent_biomes: Vec::new(),
