@@ -124,20 +124,10 @@ impl ServerPlayers {
             } else if let Some(packet) = packet_event.packet.try_deserialize::<PlayerPositionPacketToServer>() {
                 let velocity = entities.ecs.get::<&mut PhysicsComponent>(player_entity)?.clone();
                 let mut position = entities.ecs.get::<&mut PositionComponent>(player_entity)?;
-                // calculate distance
-                let dx = packet.x - position.x();
-                let dy = packet.y - position.y();
-                let distance = dx * dx + dy * dy;
 
-                // The client reports its position roughly once a second. Fast movement
-                // (falling, jumping) covers a lot of ground in that time, so a fixed
-                // tolerance causes false "teleport" detections and rubber-banding.
-                // Scale the allowed distance by how far the player could plausibly
-                // have moved given their current speed, plus a fixed base and margin.
-                let speed = f32::hypot(velocity.velocity_x, velocity.velocity_y);
-                let tolerance = 2.0 + speed * 1.5;
-
-                if distance < tolerance * tolerance {
+                // Decide whether the client's reported position is acceptable based on
+                // how far it could plausibly have moved given its current speed.
+                if accept_reported_position((packet.x, packet.y), (position.x(), position.y()), (velocity.velocity_x, velocity.velocity_y)) {
                     position.set_x(packet.x);
                     position.set_y(packet.y);
                 } else {
@@ -359,4 +349,65 @@ fn grant_starter_items(entities: &mut Entities, player_entity: hecs::Entity, ite
     inventory.has_changed = true;
 
     Ok(())
+}
+
+/// Decides whether the client's reported position should be accepted as
+/// authoritative over the server's position.
+///
+/// The client reports its position roughly once a second. Fast movement
+/// (falling, jumping) covers a lot of ground in that time, so a fixed tolerance
+/// causes false "teleport" detections and rubber-banding. The tolerance is
+/// therefore scaled by how far the player could plausibly have moved given its
+/// current speed, plus a fixed base and margin. A true teleport (large
+/// displacement at low speed) is still rejected.
+fn accept_reported_position(reported: (f32, f32), server: (f32, f32), velocity: (f32, f32)) -> bool {
+    let dx = reported.0 - server.0;
+    let dy = reported.1 - server.1;
+    let distance = dx * dx + dy * dy;
+    let speed = f32::hypot(velocity.0, velocity.1);
+    let tolerance = 2.0 + speed * 1.5;
+    distance < tolerance * tolerance
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accept_reported_position;
+
+    #[test]
+    fn accepts_standing_player_with_small_drift() {
+        // standing still (speed 0) -> tolerance is just the 2.0 base
+        let server = (0.0, 0.0);
+        let reported = (1.0, 1.0); // ~1.41 units away
+        assert!(accept_reported_position(reported, server, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn rejects_standing_player_instant_teleport() {
+        let server = (0.0, 0.0);
+        let reported = (100.0, 0.0); // far away while stationary
+        assert!(!accept_reported_position(reported, server, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn accepts_fast_player_covering_large_distance() {
+        // falling fast: speed ~30 -> tolerance is 2.0 + 45 = 47, so a 30-unit
+        // fall between reports is legitimate, not a teleport
+        let server = (0.0, 0.0);
+        let reported = (0.0, 30.0);
+        assert!(accept_reported_position(reported, server, (0.0, 30.0)));
+    }
+
+    #[test]
+    fn rejects_fast_player_true_teleport() {
+        // high speed but an implausibly large displacement beyond tolerance
+        let server = (0.0, 0.0);
+        let reported = (1000.0, 0.0);
+        assert!(!accept_reported_position(reported, server, (30.0, 0.0)));
+    }
+
+    #[test]
+    fn accepts_exact_position_without_updates() {
+        let server = (10.0, 20.0);
+        assert!(accept_reported_position(server, server, (5.0, 5.0)));
+    }
 }
