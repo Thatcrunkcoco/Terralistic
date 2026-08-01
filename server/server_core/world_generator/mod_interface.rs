@@ -31,6 +31,7 @@ impl LuaUserData for Biome {
                     "max_terrain_height" => this.max_terrain_height = b as u32,
                     "terrain_amplitude" => this.terrain_amplitude = b as f32,
                     "terrain_frequency" => this.terrain_frequency = b as f32,
+                    "cave_density" => this.cave_density = b as f32,
                     _ => {
                         return Err(rlua::Error::RuntimeError(format!("{key} is not a valid field of Biome")));
                     }

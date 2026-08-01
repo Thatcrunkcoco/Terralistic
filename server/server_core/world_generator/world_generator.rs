@@ -274,6 +274,7 @@ impl WorldGenerator {
         let mut max_heights = Vec::new();
         let mut amplitudes = Vec::new();
         let mut frequencies = Vec::new();
+        let mut max_cave_thresholds = Vec::new();
 
         println!("Creating a world with size {width}x{height}");
 
@@ -285,6 +286,7 @@ impl WorldGenerator {
             max_heights.push(biome.max_terrain_height as f32);
             amplitudes.push(biome.terrain_amplitude);
             frequencies.push(biome.terrain_frequency);
+            max_cave_thresholds.push(biome.cave_density);
         }
 
         // tasks are for loading bar
@@ -305,7 +307,7 @@ impl WorldGenerator {
         let ores_noises = self.generate_ore_noise_parameters(blocks, width, &biome_ids, &mut rng)?;
 
         let mut min_cave_thresholds = vec![0.0; width as usize];
-        let mut max_cave_thresholds = vec![0.15; width as usize];
+        // max_cave_thresholds is collected per-biome from cave_density above.
 
         // convolve the min and max heights and cave thresholds
         let convolution_size = 50;

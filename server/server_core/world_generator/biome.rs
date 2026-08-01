@@ -20,6 +20,9 @@ pub(super) struct Biome {
     // Wavelength (noise divisor) for terrain height. Smaller = more frequent hills,
     // larger = broader rolling terrain. 150.0 is the historical default.
     pub terrain_frequency: f32,
+    // How cave-filled the underground is (0.0 = none, higher = more caves).
+    // 0.15 is the historical default.
+    pub cave_density: f32,
     pub base_block: BlockId,
     pub base_wall: WallId,
     // the first element is connection weight, the second is the biome id
@@ -38,6 +41,7 @@ impl Biome {
             max_terrain_height: 0,
             terrain_amplitude: 1.0,
             terrain_frequency: 150.0,
+            cave_density: 0.15,
             base_block: BlockId::undefined(),
             base_wall: WallId::undefined(),
             adjacent_biomes: Vec::new(),
