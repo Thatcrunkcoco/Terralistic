@@ -10,7 +10,8 @@ pub fn init_walls_mod_interface(mods: &mut ModManager, walls: &Arc<Mutex<Walls>>
         wall_type.name = name;
         wall_type.break_time = break_time;
 
-        let result = Walls::register_new_wall_type(&mut walls2.lock().unwrap_or_else(std::sync::PoisonError::into_inner).wall_types, wall_type);
+        let result = Walls::register_new_wall_type(&mut walls2.lock().unwrap_or_else(std::sync::PoisonError::into_inner).wall_types, wall_type)
+            .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
         Ok(result)
     })?;
 

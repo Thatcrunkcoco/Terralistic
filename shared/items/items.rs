@@ -129,13 +129,20 @@ impl Items {
         Ok(())
     }
 
-    /// this function registers an item type
-    pub fn register_new_item_type(item_types: &mut Vec<Item>, mut item_type: Item) -> ItemId {
+    /// Registers an item type, validating that the name is non-empty and unique
+    /// among registered items. Returns an error with a clear message otherwise.
+    pub fn register_new_item_type(item_types: &mut Vec<Item>, mut item_type: Item) -> Result<ItemId> {
+        if item_type.name.is_empty() {
+            bail!("Cannot register an item type with an empty name");
+        }
+        if item_types.iter().any(|i| i.name == item_type.name) {
+            bail!("An item type named \"{}\" already exists", item_type.name);
+        }
         item_type.id = ItemId::new();
         item_type.id.id = item_types.len() as i32;
         let id = item_type.id;
         item_types.push(item_type);
-        id
+        Ok(id)
     }
 
     /// this function returns the item type with the given id

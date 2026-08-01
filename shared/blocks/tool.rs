@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::shared::blocks::Blocks;
@@ -31,12 +32,19 @@ impl ToolId {
 }
 
 impl Blocks {
-    /// Adds a new tool type to the world.
-    pub fn register_new_tool_type(&mut self, mut tool: Tool) -> ToolId {
+    /// Adds a new tool type to the world, validating that the name is non-empty
+    /// and unique among registered tools.
+    pub fn register_new_tool_type(&mut self, mut tool: Tool) -> Result<ToolId> {
+        if tool.name.is_empty() {
+            bail!("Cannot register a tool with an empty name");
+        }
+        if self.tool_types.iter().any(|t| t.name == tool.name) {
+            bail!("A tool named \"{}\" already exists", tool.name);
+        }
         let id = self.tool_types.len() as i32;
         tool.id = ToolId { id };
         self.tool_types.push(tool);
-        ToolId { id }
+        Ok(ToolId { id })
     }
 
     /// Returns the tool type that has the specified name

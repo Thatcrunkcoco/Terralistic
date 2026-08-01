@@ -3,7 +3,6 @@ use bincode;
 use serde_derive::{Deserialize, Serialize};
 use snap;
 
-use crate::shared::blocks::Tool;
 use crate::shared::blocks::{Blocks, ToolId};
 use crate::shared::walls::{BreakingWall, Wall};
 use crate::shared::world_map::WorldMap;
@@ -47,7 +46,7 @@ pub struct Walls {
 }
 
 impl Walls {
-    pub fn new(blocks: &mut Blocks) -> Self {
+    pub fn new(_blocks: &mut Blocks) -> Self {
         let mut result = Self {
             walls_data: WallsData::new(),
 
@@ -60,11 +59,12 @@ impl Walls {
 
         let mut clear = Wall::new();
         "clear".clone_into(&mut clear.name);
-        result.clear = Self::register_new_wall_type(&mut result.wall_types, clear);
+        // cannot fail: the built-in "clear" wall has a valid unique name
+        result.clear = Self::register_new_wall_type(&mut result.wall_types, clear).ok().unwrap();
 
-        let mut hammer = Tool::new();
-        "hammer".clone_into(&mut hammer.name);
-        result.hammer = blocks.register_new_tool_type(hammer);
+        // The hammer tool is deliberately not registered here: the base game mod
+        // defines the canonical "hammer" tool/entity, and registering a duplicate
+        // would collide with mod content.
 
         result
     }
@@ -129,12 +129,19 @@ impl Walls {
     }
 
     /// This function adds a new wall type, but is used internally by mods.
-    pub(super) fn register_new_wall_type(wall_types: &mut Vec<Wall>, mut wall_type: Wall) -> WallId {
+    /// Validates that the name is non-empty and unique among registered walls.
+    pub(super) fn register_new_wall_type(wall_types: &mut Vec<Wall>, mut wall_type: Wall) -> Result<WallId> {
+        if wall_type.name.is_empty() {
+            bail!("Cannot register a wall type with an empty name");
+        }
+        if wall_types.iter().any(|w| w.name == wall_type.name) {
+            bail!("A wall type named \"{}\" already exists", wall_type.name);
+        }
         let id = wall_types.len() as i8;
         let result = WallId { id };
         wall_type.id = result;
         wall_types.push(wall_type);
-        result
+        Ok(result)
     }
 
     /// Returns a wall id type with the given name

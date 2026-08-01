@@ -7,6 +7,8 @@ mod tests {
     use crate::shared::blocks::Block;
     use crate::shared::blocks::BlockChangeEvent;
     use crate::shared::blocks::Blocks;
+    use crate::shared::blocks::Tool;
+    use crate::shared::blocks::ToolId;
 
     #[test]
     fn test_blocks_new() {
@@ -37,10 +39,12 @@ mod tests {
     fn test_blocks_set_get() {
         let mut blocks = Blocks::new();
         blocks.create((50, 50));
-        let block_type1 = Block::new();
-        let block_type2 = Block::new();
-        let block_id1 = blocks.register_new_block_type(block_type1);
-        let block_id2 = blocks.register_new_block_type(block_type2);
+        let mut block_type1 = Block::new();
+        block_type1.name = "test_block_1".to_owned();
+        let mut block_type2 = Block::new();
+        block_type2.name = "test_block_2".to_owned();
+        let block_id1 = blocks.register_new_block_type(block_type1).unwrap();
+        let block_id2 = blocks.register_new_block_type(block_type2).unwrap();
 
         let mut events = EventManager::new();
 
@@ -59,8 +63,9 @@ mod tests {
     fn test_blocks_set_out_of_bound() {
         let mut blocks = Blocks::new();
         blocks.create((50, 50));
-        let block_type1 = Block::new();
-        let block_id1 = blocks.register_new_block_type(block_type1);
+        let mut block_type1 = Block::new();
+        block_type1.name = "test_block_1".to_owned();
+        let block_id1 = blocks.register_new_block_type(block_type1).unwrap();
 
         let mut events = EventManager::new();
 
@@ -79,10 +84,12 @@ mod tests {
     fn test_blocks_create_from_block_ids() {
         let mut blocks = Blocks::new();
 
-        let block_type1 = Block::new();
-        let block_type2 = Block::new();
-        let block_id1 = blocks.register_new_block_type(block_type1);
-        let block_id2 = blocks.register_new_block_type(block_type2);
+        let mut block_type1 = Block::new();
+        block_type1.name = "test_block_1".to_owned();
+        let mut block_type2 = Block::new();
+        block_type2.name = "test_block_2".to_owned();
+        let block_id1 = blocks.register_new_block_type(block_type1).unwrap();
+        let block_id2 = blocks.register_new_block_type(block_type2).unwrap();
 
         let blocks_vector = vec![
             vec![block_id1, block_id1, block_id1],
@@ -111,10 +118,12 @@ mod tests {
     fn test_set_spawns_event() {
         let mut blocks = Blocks::new();
         blocks.create((50, 50));
-        let block_type1 = Block::new();
-        let block_type2 = Block::new();
-        let block_id1 = blocks.register_new_block_type(block_type1);
-        let block_id2 = blocks.register_new_block_type(block_type2);
+        let mut block_type1 = Block::new();
+        block_type1.name = "test_block_1".to_owned();
+        let mut block_type2 = Block::new();
+        block_type2.name = "test_block_2".to_owned();
+        let block_id1 = blocks.register_new_block_type(block_type1).unwrap();
+        let block_id2 = blocks.register_new_block_type(block_type2).unwrap();
 
         let mut events = EventManager::new();
 
@@ -150,5 +159,52 @@ mod tests {
 
         let event = events.pop_event();
         assert!(event.is_none());
+    }
+
+    fn new_test_block(name: &str) -> Block {
+        let mut block = Block::new();
+        block.name = name.to_owned();
+        block
+    }
+
+    #[test]
+    fn test_register_block_empty_name_rejected() {
+        let mut blocks = Blocks::new();
+        let block = new_test_block("");
+        assert!(blocks.register_new_block_type(block).is_err());
+    }
+
+    #[test]
+    fn test_register_block_duplicate_name_rejected() {
+        let mut blocks = Blocks::new();
+        assert!(blocks.register_new_block_type(new_test_block("dirt")).is_ok());
+        assert!(blocks.register_new_block_type(new_test_block("dirt")).is_err());
+        assert!(blocks.register_new_block_type(new_test_block("stone")).is_ok());
+    }
+
+    #[test]
+    fn test_register_block_unknown_tool_rejected() {
+        let mut blocks = Blocks::new();
+        // a tool id that has never been registered is rejected
+        let mut block = new_test_block("weird");
+        block.effective_tool = Some(ToolId::new());
+        assert!(blocks.register_new_block_type(block).is_err());
+    }
+
+    #[test]
+    fn test_register_block_known_tool_accepted() {
+        let mut blocks = Blocks::new();
+        assert!(blocks.register_new_tool_type(Tool { name: "pickaxe".to_owned(), id: ToolId::new() }).is_ok());
+
+        let mut block = new_test_block("stone_block");
+        block.effective_tool = Some(blocks.get_tool_id_by_name(&"pickaxe".to_owned()).unwrap());
+        assert!(blocks.register_new_block_type(block).is_ok());
+    }
+
+    #[test]
+    fn test_register_tool_duplicate_name_rejected() {
+        let mut blocks = Blocks::new();
+        assert!(blocks.register_new_tool_type(Tool { name: "pickaxe".to_owned(), id: ToolId::new() }).is_ok());
+        assert!(blocks.register_new_tool_type(Tool { name: "pickaxe".to_owned(), id: ToolId::new() }).is_err());
     }
 }

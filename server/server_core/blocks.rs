@@ -105,6 +105,12 @@ impl ServerBlocks {
 
                 let player_id = players.get_player_from_connection(&event.conn)?;
                 if let Some(player_id) = player_id {
+                    // ignore clicks outside the world so a near-edge click can't crash the server
+                    let (world_w, world_h) = self.get_blocks().get_size();
+                    if packet.x < 0 || packet.y < 0 || packet.x >= world_w as i32 || packet.y >= world_h as i32 {
+                        return Ok(());
+                    }
+
                     let held_item = entities.ecs.get::<&Inventory>(player_id)?.get_selected_item();
                     let tool = if let Some(item) = &held_item { items.get_item_type(item.item)?.tool } else { None };
 
@@ -130,24 +136,35 @@ impl ServerBlocks {
                             let block_width = self.get_blocks().get_block_type(block)?.width;
                             let block_height = self.get_blocks().get_block_type(block)?.height;
 
-                            let can_place = {
-                                let mut can_place = true;
-                                for x in 0..block_width {
-                                    for y in 0..block_height {
-                                        let current_block = self.get_blocks().get_block(packet.x + x, packet.y - y)?;
-                                        if current_block != self.get_blocks().air() {
-                                            can_place = false;
+                            // Ignore placements whose footprint would extend
+                            // outside the world instead of erroring, so a valid
+                            // click near the edge can't crash the server/connection.
+                            let (world_w, world_h) = self.get_blocks().get_size();
+                            let placement_in_bounds = packet.x >= 0
+                                && (packet.y - block_height + 1) >= 0
+                                && (packet.x + block_width - 1) < world_w as i32
+                                && packet.y < world_h as i32;
+
+                            if placement_in_bounds {
+                                let can_place = {
+                                    let mut can_place = true;
+                                    for x in 0..block_width {
+                                        for y in 0..block_height {
+                                            let current_block = self.get_blocks().get_block(packet.x + x, packet.y - y)?;
+                                            if current_block != self.get_blocks().air() {
+                                                can_place = false;
+                                            }
                                         }
                                     }
-                                }
-                                can_place
-                            };
+                                    can_place
+                                };
 
-                            if can_place {
-                                self.get_blocks().set_block(events, packet.x, packet.y - block_height + 1, block)?;
-                                selected_item.count -= 1;
-                                let selected_slot = player_inventory.selected_slot.unwrap_or(0);
-                                player_inventory.set_item(selected_slot, Some(selected_item))?;
+                                if can_place {
+                                    self.get_blocks().set_block(events, packet.x, packet.y - block_height + 1, block)?;
+                                    selected_item.count -= 1;
+                                    let selected_slot = player_inventory.selected_slot.unwrap_or(0);
+                                    player_inventory.set_item(selected_slot, Some(selected_item))?;
+                                }
                             }
                         }
                     }

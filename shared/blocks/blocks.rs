@@ -70,7 +70,8 @@ impl Blocks {
         air.name = "air".to_owned();
         air.ghost = true;
         air.transparent = true;
-        result.air = result.register_new_block_type(air);
+        // cannot fail: the built-in "air" block always has a valid unique name and no tool
+        result.air = result.register_new_block_type(air).ok().unwrap();
 
         result
     }
@@ -214,12 +215,30 @@ impl Blocks {
         Ok(())
     }
 
-    pub fn register_new_block_type(&mut self, mut block_type: Block) -> BlockId {
+    /// Registers a new block type, validating it first. Returns an error with a
+    /// clear message (for modders) if the block has an empty/duplicate name or
+    /// references a tool that hasn't been registered yet.
+    pub fn register_new_block_type(&mut self, mut block_type: Block) -> Result<BlockId> {
+        if block_type.name.is_empty() {
+            bail!("Cannot register a block type with an empty name");
+        }
+        if self.block_types.iter().any(|b| b.name == block_type.name) {
+            bail!("A block type named \"{}\" already exists", block_type.name);
+        }
+        if let Some(tool) = block_type.effective_tool {
+            if self.get_tool_by_id(tool).is_none() {
+                bail!(
+                    "Block type \"{}\" references a tool that has not been registered yet",
+                    block_type.name
+                );
+            }
+        }
+
         let id = self.block_types.len() as i8;
         let result = BlockId { id };
         block_type.id = result;
         self.block_types.push(block_type);
-        result
+        Ok(result)
     }
 
     pub fn get_block_id_by_name(&self, name: &str) -> Result<BlockId> {

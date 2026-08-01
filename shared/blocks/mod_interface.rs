@@ -94,7 +94,11 @@ pub fn init_blocks_mod_interface(blocks: &Arc<Mutex<Blocks>>, mods: &mut ModMana
             block_type.clickable = clickable;
             block_type.inventory_slots = inventory_slots;
 
-            let result = blocks_clone.lock().unwrap_or_else(PoisonError::into_inner).register_new_block_type(block_type);
+            let result = blocks_clone
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .register_new_block_type(block_type)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
 
             Ok(result)
         },
@@ -144,7 +148,7 @@ pub fn init_blocks_mod_interface(blocks: &Arc<Mutex<Blocks>>, mods: &mut ModMana
         let mut block_types = blocks_clone.lock().unwrap_or_else(PoisonError::into_inner);
         let mut tool = Tool::new();
         tool.name = name;
-        let tool_id = block_types.register_new_tool_type(tool);
+        let tool_id = block_types.register_new_tool_type(tool).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
         Ok(tool_id)
     })?;
 

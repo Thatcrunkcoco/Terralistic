@@ -46,7 +46,8 @@ pub fn init_items_mod_interface(items: &Arc<Mutex<Items>>, entities: &Arc<Mutex<
             item_type.tool = tool;
             item_type.tool_power = tool_power;
 
-            let result = Items::register_new_item_type(&mut items_clone.lock().unwrap_or_else(PoisonError::into_inner).item_types, item_type);
+            let result = Items::register_new_item_type(&mut items_clone.lock().unwrap_or_else(PoisonError::into_inner).item_types, item_type)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
             Ok(result)
         },
     )?;
