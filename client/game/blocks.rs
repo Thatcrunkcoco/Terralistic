@@ -163,6 +163,7 @@ impl ClientBlocks {
             } else if let Some(packet) = event.try_deserialize::<BlockChangePacket>() {
                 self.get_blocks().set_big_block(events, packet.x, packet.y, packet.block, (packet.from_main_x, packet.from_main_y))?;
                 self.get_blocks().set_block_inventory_data(packet.x, packet.y, packet.inventory, events)?;
+                self.get_blocks().set_block_data(packet.x, packet.y, packet.state)?;
             }
         } else if let Some(event) = event.downcast::<BlockChangeEvent>() {
             for (x, y) in [(event.x, event.y), (event.x - 1, event.y), (event.x + 1, event.y), (event.x, event.y - 1), (event.x, event.y + 1)] {

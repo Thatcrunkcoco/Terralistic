@@ -189,6 +189,7 @@ impl ServerBlocks {
             let from_main = self.get_blocks().get_block_from_main(event.x, event.y)?;
             let block = self.get_blocks().get_block(event.x, event.y)?;
             let inventory = self.get_blocks().get_block_inventory_data(event.x, event.y)?;
+            let state = self.get_blocks().get_block_data(event.x, event.y)?;
             let packet = Packet::new(BlockChangePacket {
                 x: event.x,
                 y: event.y,
@@ -196,6 +197,7 @@ impl ServerBlocks {
                 from_main_y: from_main.1,
                 block,
                 inventory,
+                state,
             })?;
             networking.send_packet(&packet, SendTarget::All)?;
 
@@ -213,6 +215,7 @@ impl ServerBlocks {
             let block = self.get_blocks().get_block(event.x, event.y)?;
             let from_main = self.get_blocks().get_block_from_main(event.x, event.y)?;
             let inventory = self.get_blocks().get_block_inventory_data(event.x, event.y)?;
+            let state = self.get_blocks().get_block_data(event.x, event.y)?;
             let packet = Packet::new(BlockChangePacket {
                 x: event.x,
                 y: event.y,
@@ -220,6 +223,7 @@ impl ServerBlocks {
                 from_main_x: from_main.0,
                 from_main_y: from_main.1,
                 inventory,
+                state,
             })?;
             networking.send_packet(&packet, SendTarget::All)?;
         }

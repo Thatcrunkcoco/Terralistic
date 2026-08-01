@@ -428,6 +428,8 @@ pub struct BlockChangePacket {
     pub from_main_y: i32,
     pub block: BlockId,
     pub inventory: Vec<Option<ItemStack>>,
+    /// Generic per-block state blob (e.g. serialized tile entity state).
+    pub state: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize)]
