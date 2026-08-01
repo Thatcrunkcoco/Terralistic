@@ -509,7 +509,7 @@ fn place_test_label(
     stone: BlockId,
     _name: &str,
 ) {
-    for h in ground - 5..ground {
+    for h in ground - 3..ground {
         tset(terrain, *cursor, h, width, height, stone);
     }
     *cursor += 6;
@@ -544,9 +544,9 @@ fn place_test_tree(terrain: &mut Vec<Vec<BlockId>>, x: i32, surface_y: i32, widt
     tset(terrain, x - 2, trunk_top - 5, width, height, canopy);
 }
 
-/// A tall tower of stone blocks to test vertical mining/climbing.
+/// A small tower of stone blocks to test stacking/jumping.
 fn build_pillar_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    let top = ground - 16;
+    let top = ground - 3;
     for y in top..=ground {
         for dx in 0..3 {
             tset(terrain, x + dx, y, ctx.width, height, ctx.stone_block);
@@ -554,9 +554,9 @@ fn build_pillar_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, he
     }
 }
 
-/// A pit dug into the ground to test digging downward.
+/// A shallow pit dug into the ground you can jump back out of.
 fn build_pit_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    let bottom = ground + 8;
+    let bottom = ground + 3;
     for y in ground + 1..=bottom {
         for dx in 0..4 {
             tset(terrain, x + dx, y, ctx.width, height, ctx.air);
@@ -568,11 +568,11 @@ fn build_pit_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, heigh
     }
 }
 
-/// A small mountain of stacked stone to test climbing/walking up slopes.
+/// Small stone steps to test climbing/walking up slopes.
 fn build_mount_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    for step in 0..5 {
+    for step in 0..3 {
         let level = ground - step;
-        for dx in 0..(5 - step) {
+        for dx in 0..(4 - step) {
             tset(terrain, x + dx, level, ctx.width, height, ctx.stone);
         }
     }
@@ -582,15 +582,15 @@ fn build_mount_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, hei
 fn build_ores_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
     let ores = [ctx.copper, ctx.iron, ctx.tin];
     for (i, ore) in ores.iter().enumerate() {
-        for y in ground + 1..ground + 10 {
+        for y in ground + 1..ground + 4 {
             tset(terrain, x + i as i32, y, ctx.width, height, *ore);
         }
     }
 }
 
-/// A raised wooden platform/steps to test vertical building and jumping.
+/// Low wooden steps to test vertical building and jumping.
 fn build_platform_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    for step in 0..4 {
+    for step in 0..3 {
         let level = ground - step;
         for dx in 0..3 {
             tset(terrain, x + dx, level, ctx.width, height, ctx.wood_planks);
@@ -605,9 +605,9 @@ fn build_torches_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, h
     }
 }
 
-/// A small hollow house (wood planks with an air doorway) to test building.
+/// A small low house (wood planks with a doorway) to test building.
 fn build_house_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    let wall_top = ground - 5;
+    let wall_top = ground - 3;
     // walls
     for y in wall_top..=ground {
         tset(terrain, x, y, ctx.width, height, ctx.wood_planks);
@@ -622,11 +622,11 @@ fn build_house_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, hei
     tset(terrain, x + 4, ground - 1, ctx.width, height, ctx.air);
 }
 
-/// A tall vertical wall of stone to test tunneling through.
+/// Low stone blocks to test stepping/tunneling.
 fn build_wall_section(terrain: &mut Vec<Vec<BlockId>>, x: i32, ground: i32, height: i32, ctx: &SectionCtx) {
-    let top = ground - 12;
+    let top = ground - 3;
     for y in top..=ground {
-        for dx in 0..2 {
+        for dx in 0..3 {
             tset(terrain, x + dx, y, ctx.width, height, ctx.stone_block);
         }
     }

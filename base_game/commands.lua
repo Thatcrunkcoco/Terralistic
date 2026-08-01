@@ -146,15 +146,15 @@ Usage: heal [amount] [player] - amount defaults to 100, player defaults to the e
 end
 
 function command_test(arguments, executor)
-    return [[Flat test world: you spawn near the middle. Walk WEST (toward x=0) to find the labeled sections in order:
-pillar - tower of stone blocks
-pit - a hole dug into the ground
-mount - small stone mountain
-ores - columns of copper/iron/tin ore
-platform - wooden steps
+    return [[Flat test world: you spawn near the middle. Walk WEST (toward x=0) to find the labeled sections in order. All structures are jumpable - no digging needed:
+pillar - a short stone block stack
+pit - shallow hole you can jump out of
+mount - low stone steps
+ores - columns of copper/iron/tin (embedded, mine to collect)
+platform - low wooden steps
 torches - torch line (light test)
-house - small hollow wood house
-wall - a wall of stone to tunnel through]]
+house - small low wood house
+wall - a short stone wall to step over]]
 end
 
 function describe_command_test()
