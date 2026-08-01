@@ -503,55 +503,16 @@ function on_block_break(x, y, block_id)
     end
 end
 
-function get_smelting_result(item_id)
-    if item_id == items.copper_ore then
-        return items.wood_planks
-    end
-    if item_id == items.wood_planks then
-        return items.copper_ore
-    end
-    return nil
-end
-
-function on_block_update(x, y)
-    block_id = terralistic_get_block(x, y)
-
-    if block_id == blocks.furnace then
-        -- check furnace inventory and update it accordingly
-        local inventory_items = terralistic_get_block_inventory_items(x, y)
-        local inventory_item_counts = terralistic_get_block_inventory_item_counts(x, y)
-
-        -- check if there is an item in the first slot and if it can be smelted
-        if inventory_items[1] ~= nil and get_smelting_result(inventory_items[1]) ~= nil then
-            local success = false
-            -- if there is an item in the third slot, check if it is the same as the result of the smelting
-            if inventory_items[3] == get_smelting_result(inventory_items[1]) then
-                -- if it is the same, increase the count of the item in the second slot
-                inventory_item_counts[3] = inventory_item_counts[3] + 1
-                success = true
-            else
-                -- if it is not the same, check if the second slot is empty
-                if inventory_items[3] == nil then
-                    -- if it is empty, put the result of the smelting in the second slot
-                    inventory_items[3] = get_smelting_result(inventory_items[1])
-                    inventory_item_counts[3] = 1
-                    success = true
-                end
-            end
-
-            if success then
-                -- decrease the count of the item in the first slot
-                inventory_item_counts[1] = inventory_item_counts[1] - 1
-
-                -- if the count of the item in the first slot is 0, remove the item from the first slot
-                if inventory_item_counts[1] == 0 then
-                    inventory_items[1] = nil
-                    inventory_item_counts[1] = nil
-                end
-
-                terralistic_set_block_inventory_item(x, y, 0, inventory_items[1], inventory_item_counts[1])
-                terralistic_set_block_inventory_item(x, y, 2, inventory_items[3], inventory_item_counts[3])
-            end
-        end
-    end
+function register_tile_entities()
+    -- The furnace is a processing tile entity. Lua declares its inputs/outputs
+    -- and speed; Rust runs the per-tick smelting loop.
+    terralistic_register_tile_entity_type(
+        "furnace",      -- name
+        "furnace",      -- block name
+        3.0,            -- seconds per smelt
+        0,              -- input slot
+        2,              -- output slot
+        {"copper_ore", "wood_planks"},   -- inputs
+        {"wood_planks", "copper_ore"}    -- outputs
+    )
 end

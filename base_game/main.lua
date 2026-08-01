@@ -19,6 +19,7 @@ function init()
     register_blocks()
     register_walls()
     register_items()
+    register_tile_entities()
     register_recipes()
 
     terralistic_print("base_game mod loaded.")

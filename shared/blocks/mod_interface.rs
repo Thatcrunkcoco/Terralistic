@@ -3,7 +3,8 @@ use std::sync::{Mutex, PoisonError};
 
 use anyhow::Result;
 
-use crate::shared::blocks::{Block, BlockId, Blocks, Tool, ToolId};
+use crate::shared::blocks::{Block, BlockId, Blocks, TileEntityType, TileRecipe, Tool, ToolId};
+use crate::shared::items::Items;
 use crate::shared::mod_manager::ModManager;
 
 // make BlockId lua compatible
@@ -25,7 +26,7 @@ impl rlua::UserData for BlockId {
 
 /// initialize the mod interface for the blocks module
 #[allow(clippy::too_many_lines)]
-pub fn init_blocks_mod_interface(blocks: &Arc<Mutex<Blocks>>, mods: &mut ModManager) -> Result<()> {
+pub fn init_blocks_mod_interface(blocks: &Arc<Mutex<Blocks>>, items: &Arc<Mutex<Items>>, mods: &mut ModManager) -> Result<()> {
     let blocks_clone = blocks.clone();
     mods.add_global_function(
         "register_block_type",
@@ -191,6 +192,34 @@ pub fn init_blocks_mod_interface(blocks: &Arc<Mutex<Blocks>>, mods: &mut ModMana
 
         Ok(res)
     })?;
+
+    // a method to register a tile entity type (e.g. a furnace/machine).
+    // Registered on both client and server so mod init() works on both.
+    let blocks_clone = blocks.clone();
+    let items_clone = items.clone();
+    mods.add_global_function(
+        "register_tile_entity_type",
+        move |_lua,
+              (name, block_name, tick_time, input_slot, output_slot, input_items, output_items): (String, String, f32, i32, i32, Vec<String>, Vec<String>)| {
+            let mut recipes = Vec::new();
+            {
+                let items = items_clone.lock().unwrap_or_else(PoisonError::into_inner);
+                for (input_name, output_name) in input_items.iter().zip(output_items.iter()) {
+                    let input = items.get_item_type_by_name(input_name).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?.get_id();
+                    let output = items.get_item_type_by_name(output_name).map_err(|e| rlua::Error::RuntimeError(e.to_string()))?.get_id();
+                    recipes.push(TileRecipe { input, output });
+                }
+            }
+
+            let ty = TileEntityType::new(name, tick_time, input_slot.max(0) as usize, output_slot.max(0) as usize, recipes);
+            blocks_clone
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .register_tile_entity_type(ty, block_name)
+                .map_err(|e| rlua::Error::RuntimeError(e.to_string()))?;
+            Ok(())
+        },
+    )?;
 
     Ok(())
 }

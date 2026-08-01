@@ -102,4 +102,8 @@ impl ClientItems {
     pub fn get_items(&self) -> MutexGuard<'_, Items> {
         self.items.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    pub fn get_items_arc(&self) -> Arc<Mutex<Items>> {
+        self.items.clone()
+    }
 }

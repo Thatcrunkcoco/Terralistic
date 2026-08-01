@@ -75,7 +75,7 @@ pub fn run_game(
             items.on_event(&event, &mut entities.get_entities(), &mut pre_events)?;
         }
 
-        blocks.init(&mut mods.mod_manager)?;
+        blocks.init(&items.get_items_arc(), &mut mods.mod_manager)?;
         walls.init(&mut mods.mod_manager)?;
         items.init(&mut mods.mod_manager, &entities.get_entities_arc())?;
 

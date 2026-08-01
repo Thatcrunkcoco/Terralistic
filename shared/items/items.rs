@@ -22,6 +22,13 @@ impl ItemId {
     pub const fn new() -> Self {
         Self { id: -1 }
     }
+
+    /// Constructs an item id from a raw registry index. Used by systems that
+    /// reconstruct item references (e.g. tile-entity recipes) from resolved data.
+    #[must_use]
+    pub const fn from_raw(id: i32) -> Self {
+        Self { id }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]

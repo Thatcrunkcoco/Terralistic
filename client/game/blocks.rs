@@ -8,6 +8,7 @@ use crate::libraries::events::{Event, EventManager};
 use crate::libraries::graphics as gfx;
 use crate::shared::blocks::{init_blocks_mod_interface, BlockBreakStartPacket, BlockBreakStopPacket, BlockChangeEvent, BlockChangePacket, BlockId, BlockRightClickPacket};
 use crate::shared::blocks::{Blocks, BlocksWelcomePacket, BLOCK_WIDTH, RENDER_BLOCK_WIDTH, RENDER_SCALE};
+use crate::shared::items::Items;
 use crate::shared::mod_manager::ModManager;
 use crate::shared::packet::Packet;
 use crate::shared::world_map::CHUNK_SIZE;
@@ -175,8 +176,8 @@ impl ClientBlocks {
         Ok(())
     }
 
-    pub fn init(&self, mods: &mut ModManager) -> Result<()> {
-        init_blocks_mod_interface(&self.blocks, mods)?;
+    pub fn init(&self, items: &Arc<Mutex<Items>>, mods: &mut ModManager) -> Result<()> {
+        init_blocks_mod_interface(&self.blocks, items, mods)?;
         Ok(())
     }
 

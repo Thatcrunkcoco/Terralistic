@@ -5,7 +5,8 @@ use serde_derive::{Deserialize, Serialize};
 use snap;
 
 use crate::libraries::events::{Event, EventManager};
-use crate::shared::blocks::{Block, BlockBreakEvent, BreakingBlock, Tool};
+use crate::shared::blocks::{Block, BlockBreakEvent, BreakingBlock, TileEntityRegistry, TileEntityState, TileEntityType, TileEntityTypeId, Tool};
+use crate::shared::blocks::tile_entity::{apply_recipe, can_continue, step};
 use crate::shared::items::ItemStack;
 use crate::shared::world_map::WorldMap;
 
@@ -46,6 +47,7 @@ pub struct Blocks {
     pub(super) breaking_blocks: Vec<BreakingBlock>,
     pub(super) block_types: Vec<Block>,
     pub(super) tool_types: Vec<Tool>,
+    pub(super) tile_entities: TileEntityRegistry,
     air: BlockId,
 }
 
@@ -63,6 +65,7 @@ impl Blocks {
             breaking_blocks: vec![],
             block_types: vec![],
             tool_types: vec![],
+            tile_entities: TileEntityRegistry::default(),
             air: BlockId::undefined(),
         };
 
@@ -282,6 +285,112 @@ impl Blocks {
 
         self.set_block(events, transformed_x, transformed_y, self.air())?;
 
+        Ok(())
+    }
+
+    // --- tile entities ---------------------------------------------------------
+
+    pub fn register_tile_entity_type(&mut self, ty: TileEntityType, block_name: String) -> Result<TileEntityTypeId> {
+        self.tile_entities.register(ty, block_name)
+    }
+
+    /// Reads the tile entity state bound to a block (at its main coordinate), if any.
+    pub fn get_tile_entity_state(&self, x: i32, y: i32) -> Result<Option<TileEntityState>> {
+        let (main_x, main_y) = self.get_main_block_coords(x, y)?;
+        let data = self.get_block_data(main_x, main_y)?;
+        if data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(TileEntityRegistry::unpack(&data)?))
+    }
+
+    /// Writes tile entity state for a block (at its main coordinate) and updates
+    /// the activity schedule so active entities get ticked.
+    pub fn set_tile_entity_state(&mut self, x: i32, y: i32, state: TileEntityState) -> Result<()> {
+        let (main_x, main_y) = self.get_main_block_coords(x, y)?;
+        let index = self.block_data.map.translate_coords(main_x, main_y)?;
+        let packed = TileEntityRegistry::pack(&state)?;
+        self.set_block_data(main_x, main_y, packed)?;
+        if state.active {
+            self.tile_entities.activate(index);
+        } else {
+            self.tile_entities.deactivate(index);
+        }
+        Ok(())
+    }
+
+    fn get_main_block_coords(&self, x: i32, y: i32) -> Result<(i32, i32)> {
+        let from_main = self.get_block_from_main(x, y)?;
+        Ok((x - from_main.0, y - from_main.1))
+    }
+
+    /// Advances all active tile entities by `dt` seconds. Only entities in the
+    /// active set are processed, keeping the hot path cheap at scale. When an
+    /// operation completes, the entity's recipe is applied to its inventory.
+    pub fn update_tile_entities(&mut self, events: &mut EventManager, dt: f32) -> Result<()> {
+        let height = self.block_data.map.get_size().1 as usize;
+        let active: Vec<usize> = self.tile_entities.active.iter().copied().collect();
+
+        for index in active {
+            let (x, y) = (index / height, index % height);
+            let (main_x, main_y) = self.get_main_block_coords(x as i32, y as i32)?;
+
+            // A printable index that always corresponds to the main block.
+            let main_index = self.block_data.map.translate_coords(main_x, main_y)?;
+
+            let data = self.get_block_data(main_x, main_y)?;
+            let Some(mut state) = (if data.is_empty() {
+                None
+            } else {
+                Some(TileEntityRegistry::unpack(&data)?)
+            }) else {
+                self.tile_entities.deactivate(main_index);
+                continue;
+            };
+
+            let block_name = self.get_block_type_at(main_x, main_y)?.name.clone();
+            let Some(ty) = self.tile_entities.get_by_block(&block_name).cloned() else {
+                self.tile_entities.deactivate(main_index);
+                continue;
+            };
+
+            if step(&mut state, dt, ty.tick_time) {
+                // An operation completed: apply the recipe to the inventory.
+                let mut inventory = self.get_block_inventory_data(main_x, main_y)?;
+                if apply_recipe(&ty, &mut inventory) {
+                    self.set_block_inventory_data(main_x, main_y, inventory, events)?;
+                }
+                // Only keep ticking if there's still useful input.
+                let still_work = {
+                    let inv = self.get_block_inventory_data(main_x, main_y)?;
+                    can_continue(&ty, &inv)
+                };
+                state.active = still_work;
+            }
+
+            self.set_tile_entity_state(main_x, main_y, state)?;
+        }
+        Ok(())
+    }
+
+    /// Called when a block's inventory changes. If the block is a tile entity
+    /// with usable input, it is activated so it gets ticked.
+    pub fn activate_tile_entity_if_needed(&mut self, x: i32, y: i32) -> Result<()> {
+        let (main_x, main_y) = self.get_main_block_coords(x, y)?;
+        let block_name = self.get_block_type_at(main_x, main_y)?.name.clone();
+        let ty = match self.tile_entities.get_by_block(&block_name).cloned() {
+            Some(ty) => ty,
+            None => return Ok(()),
+        };
+
+        // Read current state (or create an inactive one).
+        let mut state = self.get_tile_entity_state(main_x, main_y)?.unwrap_or(TileEntityState::inactive());
+
+        let inventory = self.get_block_inventory_data(main_x, main_y)?;
+        if can_continue(&ty, &inventory) {
+            state.active = true;
+            self.set_tile_entity_state(main_x, main_y, state)?;
+        }
         Ok(())
     }
 }

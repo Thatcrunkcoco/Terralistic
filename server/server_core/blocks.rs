@@ -36,8 +36,8 @@ impl ServerBlocks {
         }
     }
 
-    pub fn init(&mut self, mods: &mut ModManager) -> Result<()> {
-        init_blocks_mod_interface(&self.blocks, mods)?;
+    pub fn init(&mut self, items: &Arc<Mutex<Items>>, mods: &mut ModManager) -> Result<()> {
+        init_blocks_mod_interface(&self.blocks, items, mods)?;
         let receiver = init_blocks_mod_interface_server(&self.blocks, mods)?;
         self.event_receiver = Some(receiver);
         Ok(())
@@ -207,6 +207,9 @@ impl ServerBlocks {
                 }
             }
         } else if let Some(event) = event.downcast::<BlockInventoryChangeEvent>() {
+            // If the changed block hosts a tile entity with usable input, activate it.
+            self.get_blocks().activate_tile_entity_if_needed(event.x, event.y)?;
+
             let block = self.get_blocks().get_block(event.x, event.y)?;
             let from_main = self.get_blocks().get_block_from_main(event.x, event.y)?;
             let inventory = self.get_blocks().get_block_inventory_data(event.x, event.y)?;
@@ -234,7 +237,8 @@ impl ServerBlocks {
     pub fn update(&self, events: &mut EventManager, frame_length: f32) -> Result<()> {
         self.flush_mods_events(events);
 
-        self.get_blocks().update_breaking_blocks(events, frame_length)
+        self.get_blocks().update_breaking_blocks(events, frame_length)?;
+        self.get_blocks().update_tile_entities(events, frame_length)
     }
 }
 

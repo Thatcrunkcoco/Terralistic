@@ -179,7 +179,7 @@ impl Server {
 
         // init modules
         self.networking.init();
-        self.blocks.init(&mut self.mods.mod_manager)?;
+        self.blocks.init(&self.items.get_items_arc(), &mut self.mods.mod_manager)?;
         self.walls.init(&mut self.mods.mod_manager)?;
         self.items.init(&mut self.mods.mod_manager, &self.entities.get_entities_arc())?;
 
