@@ -329,7 +329,7 @@ impl Blocks {
     /// operation completes, the entity's recipe is applied to its inventory.
     pub fn update_tile_entities(&mut self, events: &mut EventManager, dt: f32) -> Result<()> {
         let height = self.block_data.map.get_size().1 as usize;
-        let active: Vec<usize> = self.tile_entities.active.iter().copied().collect();
+        let active: Vec<usize> = self.tile_entities.active_indices().collect();
 
         for index in active {
             let (x, y) = (index / height, index % height);

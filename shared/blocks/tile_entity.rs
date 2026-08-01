@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::shared::items::{ItemId, ItemStack};
+use crate::shared::scheduler::Scheduler;
 
 /// Identifies a tile-entity *type* in the world's registry.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,8 +77,8 @@ pub struct TileEntityRegistry {
     pub(super) types: Vec<TileEntityType>,
     /// maps a block type name -> tile entity type id
     pub(super) types_by_block: HashMap<String, TileEntityTypeId>,
-    /// coords (translated index) of entities that are currently active/working
-    pub(super) active: HashSet<usize>,
+    /// keys (translated block index) of entities that are currently active/working
+    pub(super) active: Scheduler<usize>,
 }
 
 impl TileEntityRegistry {
@@ -110,11 +111,16 @@ impl TileEntityRegistry {
     }
 
     pub fn activate(&mut self, index: usize) {
-        self.active.insert(index);
+        self.active.activate(index);
     }
 
     pub fn deactivate(&mut self, index: usize) {
-        self.active.remove(&index);
+        self.active.deactivate(index);
+    }
+
+    /// Iterates the translated indices of all currently-active entities.
+    pub fn active_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.active.active()
     }
 }
 
