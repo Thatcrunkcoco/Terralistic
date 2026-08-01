@@ -372,6 +372,10 @@ fn accept_reported_position(reported: (f32, f32), server: (f32, f32), velocity: 
 #[cfg(test)]
 mod tests {
     use super::accept_reported_position;
+    use super::{SavedPlayerData, ServerPlayers, PLAYER_INVENTORY_SIZE, PLAYER_MAX_HEALTH};
+    use crate::shared::entities::{HealthComponent, PositionComponent};
+    use crate::shared::inventory::Inventory;
+    use crate::shared::items::{ItemId, ItemStack};
 
     #[test]
     fn accepts_standing_player_with_small_drift() {
@@ -409,5 +413,78 @@ mod tests {
     fn accepts_exact_position_without_updates() {
         let server = (10.0, 20.0);
         assert!(accept_reported_position(server, server, (5.0, 5.0)));
+    }
+
+    // --- save-while-falling / state persistence correctness -------------------
+
+    fn saved_player_server() -> ServerPlayers {
+        ServerPlayers::new()
+    }
+
+    #[test]
+    fn save_round_trip_preserves_falling_position_and_state() {
+        // A player saved mid-fall: the position can be at an odd/offset coordinate
+        // (here negative y and high magnitude), which must survive a save->load
+        // cycle exactly so the player reloads where they were saved.
+        let position = PositionComponent::new(1234.5, -45.25);
+        let mut inventory = Inventory::new(PLAYER_INVENTORY_SIZE);
+        inventory.set_item(0, Some(ItemStack::new(ItemId::new(), 5))).unwrap();
+        let health = HealthComponent::new(80, PLAYER_MAX_HEALTH);
+
+        let mut before = saved_player_server();
+        before
+            .saved_players
+            .insert("p1".to_owned(), SavedPlayerData { inventory, position, health });
+
+        let bytes = before.serialize().unwrap();
+
+        let mut after = saved_player_server();
+        after.deserialize(&bytes).unwrap();
+
+        let saved = after.saved_players.get("p1").unwrap();
+        assert_eq!(saved.position.x(), 1234.5);
+        assert_eq!(saved.position.y(), -45.25);
+        assert_eq!(saved.health.health(), 80);
+        assert_eq!(saved.health.max_health(), PLAYER_MAX_HEALTH);
+        let item = saved.inventory.get_item(0).unwrap().unwrap();
+        assert_eq!(item.count, 5);
+    }
+
+    #[test]
+    fn save_round_trip_preserves_multiple_players_distinct() {
+        let mut before = saved_player_server();
+        before
+            .saved_players
+            .insert("a".to_owned(), SavedPlayerData {
+                position: PositionComponent::new(1.0, 2.0),
+                inventory: Inventory::new(PLAYER_INVENTORY_SIZE),
+                health: HealthComponent::new(50, PLAYER_MAX_HEALTH),
+            });
+        before
+            .saved_players
+            .insert("b".to_owned(), SavedPlayerData {
+                position: PositionComponent::new(300.0, 400.0),
+                inventory: Inventory::new(PLAYER_INVENTORY_SIZE),
+                health: HealthComponent::new(100, PLAYER_MAX_HEALTH),
+            });
+
+        let bytes = before.serialize().unwrap();
+        let mut after = saved_player_server();
+        after.deserialize(&bytes).unwrap();
+
+        assert_eq!(after.saved_players.len(), 2);
+        assert_eq!(after.saved_players.get("a").unwrap().position.x(), 1.0);
+        assert_eq!(after.saved_players.get("a").unwrap().position.y(), 2.0);
+        assert_eq!(after.saved_players.get("b").unwrap().position.x(), 300.0);
+        assert_eq!(after.saved_players.get("b").unwrap().position.y(), 400.0);
+    }
+
+    #[test]
+    fn empty_save_round_trips_to_empty() {
+        let before = saved_player_server();
+        let bytes = before.serialize().unwrap();
+        let mut after = saved_player_server();
+        after.deserialize(&bytes).unwrap();
+        assert!(after.saved_players.is_empty());
     }
 }
