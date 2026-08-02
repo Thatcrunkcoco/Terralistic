@@ -277,12 +277,20 @@ impl UiElement for TextInput {
         );
 
         if !self.text.is_empty() {
+            // Use a constant, font-derived height for vertical centering in
+            // terminal mode so the baseline doesn't shift as different-height
+            // characters are typed.
+            let text_render_height = if self.use_terminal_font {
+                self.terminal_display_line_height / graphics.real_scale()
+            } else {
+                self.text_texture.get_texture_size().1 * self.text_scale(graphics)
+            };
             self.text_texture.render(
                 graphics,
                 self.text_scale(graphics),
                 gfx::FloatPos(
                     rect.pos.0 + self.padding * self.text_scale(graphics),
-                    rect.pos.1 + rect.size.1 / 2.0 - self.text_texture.get_texture_size().1 * self.text_scale(graphics) / 2.0,
+                    rect.pos.1 + rect.size.1 / 2.0 - text_render_height / 2.0,
                 ),
                 Some(src_rect),
                 false,
