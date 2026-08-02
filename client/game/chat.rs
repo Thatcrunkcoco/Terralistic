@@ -5,7 +5,7 @@ use crate::libraries::events::Event;
 use crate::libraries::graphics as gfx;
 use crate::shared::chat::ChatPacket;
 use crate::shared::packet::Packet;
-use gfx::{BaseUiElement, UiElement};
+use gfx::BaseUiElement;
 
 pub struct ChatLine {
     texture: gfx::Texture,
@@ -93,22 +93,19 @@ impl ClientChat {
 
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext) {
         let window_container = gfx::Container::default(graphics);
+        let window_size = graphics.get_window_size();
         if self.visible {
-            if self.text_input.selected {
-                self.back_rect.size.0 = gfx::TEXT_INPUT_WIDTH * self.text_input.scale;
-            } else {
-                self.back_rect.size.0 = gfx::TEXT_INPUT_WIDTH * self.text_input.scale * 0.6;
-            }
+            self.back_rect.size.0 = window_size.0 - gfx::SPACING * 2.0;
 
             self.back_rect.update(graphics, &window_container);
             self.back_rect.render(graphics, &window_container);
 
-            self.text_input.width = self.back_rect.get_container(graphics, &window_container).rect.size.0 / self.text_input.scale;
+            self.text_input.width = (window_size.0 - gfx::SPACING * 2.0) / self.text_input.scale;
             self.text_input.update(graphics, &window_container);
             self.text_input.render(graphics, &window_container);
         }
 
-        let mut curr_y = graphics.get_window_size().1 - gfx::SPACING - self.text_input.get_size().1;
+        let mut curr_y = window_size.1 - gfx::SPACING - self.text_input.get_size().1;
         for line in self.chat_lines.iter_mut().rev() {
             curr_y -= line.get_size().1;
             line.render(graphics, gfx::FloatPos(gfx::SPACING, curr_y), self.text_input.selected);
