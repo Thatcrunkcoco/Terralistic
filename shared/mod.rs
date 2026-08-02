@@ -1,6 +1,7 @@
 pub mod blocks;
 pub mod chat;
 pub mod entities;
+pub mod gases;
 pub mod inventory;
 pub mod items;
 pub mod lights;
