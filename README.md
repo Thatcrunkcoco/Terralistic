@@ -5,7 +5,24 @@ a Rust engine at its core and **Lua mods** as the content/definition layer. Sing
 runs both the server and client in one process over localhost; multiplayer uses the
 same authoritative server for friends to join.
 
-Discord server: https://discord.gg/WANEYJAxAB
+## Synopsis
+
+Terralistic is a block-based sandbox game that blends two distinct design pillars:
+the **world exploration and boss-fight progression of Terraria** with the **deep,
+survival-engineering mechanics of Oxygen Not Included**.
+
+- **From Terraria** — a vast, procedurally generated world meant to be explored and
+  conquered. Dig deep, travel far, seek out materials, and face progressively harder
+  bosses that gate access to new tiers of gear and content. Progression is driven by
+  *what you go out and find*.
+- **From Oxygen Not Included** — a rich, systemic simulation under the surface. A
+  base is more than a pretty structure: it must *breathe*, *eat*, and *not collapse*.
+  Expect layered mechanics around gases, liquids, temperature, power, and resource
+  loops that reward careful base design and planning.
+
+The player is the bridge between the two: you must explore and fight to gather what
+your base needs to survive, and you must design a base robust enough to fuel the
+deeper expeditions that progression demands.
 
 ---
 
