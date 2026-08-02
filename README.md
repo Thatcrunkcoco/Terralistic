@@ -109,7 +109,27 @@ cargo run -- --debug
   runtime overhead — so it is effectively excluded from normal play and release.
 
 It is primarily a development/diagnostic tool, e.g. for investigating client/server
-sync issues like rubber-banding.
+sync issues.
+
+### Debugging native crashes (gdb)
+
+A panic hook cannot catch a **native** crash (SIGSEGV/SIGABRT) that happens inside a
+C library called over FFI — e.g. OpenGL or SDL2 — even though the logic that triggers
+it is written in Rust. `unsafe` calls into these libraries are outside Rust's safety
+guarantees, so a bad call (like freeing a GL resource after its context is destroyed)
+can segfault the process with no Rust backtrace.
+
+To diagnose such a crash, run the game under gdb and read the native backtrace:
+
+```bash
+cargo build
+gdb --args ./target/debug/terralistic --debug
+(gdb) run      # play, then quit to reproduce the crash
+(gdb) bt       # print the native stack trace of the crash
+```
+
+The backtrace shows exactly which `gl::*`/SDL call and which Rust `Drop`/method
+triggered it, making the fix straightforward.
 
 ---
 
