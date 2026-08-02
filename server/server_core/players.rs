@@ -10,7 +10,7 @@ use crate::server::server_core::blocks::ServerBlocks;
 use crate::server::server_core::networking::{Connection, DisconnectEvent, NewConnectionWelcomedEvent, PacketFromClientEvent, SendTarget, ServerNetworking};
 use crate::server::server_core::print_to_console;
 use crate::shared::blocks::Blocks;
-use crate::shared::entities::{Entities, EntityPositionVelocityPacket, HealthChangeEvent, PhysicsComponent, PositionComponent};
+use crate::shared::entities::{Entities, HealthChangeEvent, PhysicsComponent, PositionComponent};
 use crate::shared::entities::{HealthChangePacket, HealthComponent};
 use crate::shared::inventory::{Inventory, InventoryCraftPacket, InventoryPacket, InventorySelectPacket, InventorySwapPacket, Slot};
 use crate::shared::items::{Items, ItemStack};
@@ -122,34 +122,17 @@ impl ServerPlayers {
 
                 *entities.ecs.get::<&mut Inventory>(player_entity)? = inventory;
             } else if let Some(packet) = packet_event.packet.try_deserialize::<PlayerPositionPacketToServer>() {
-                let velocity = entities.ecs.get::<&mut PhysicsComponent>(player_entity)?.clone();
                 let mut position = entities.ecs.get::<&mut PositionComponent>(player_entity)?;
 
-                // Decide whether the client's reported position is acceptable based on
-                // how far it could plausibly have moved given its current speed.
+                // Client-side prediction: the client runs real input/physics, so we
+                // trust its reported position for the main player and adopt it. We
+                // no longer reject legitimate fast movement here, which historically
+                // snapped the client back to our stale position (rubber-banding).
                 let reported = (packet.x, packet.y);
                 let current = (position.x(), position.y());
-                let vel = (velocity.velocity_x, velocity.velocity_y);
-                if accept_reported_position(reported, current, vel) {
-                    tracing::trace!("accepted client pos: ({:.2},{:.2}) from ({:.2},{:.2}) vel=({:.2},{:.2})", reported.0, reported.1, current.0, current.1, vel.0, vel.1);
-                    position.set_x(packet.x);
-                    position.set_y(packet.y);
-                } else {
-                    // sent a forced correction (rubber-band) because client position
-                    // diverged too far from the server's authoritative position
-                    tracing::warn!("FORCING client pos: ({:.2},{:.2}) from ({:.2},{:.2}) vel=({:.2},{:.2})", current.0, current.1, reported.0, reported.1, vel.0, vel.1);
-                    // send entity packet again but with force
-                    let id = entities.get_id_from_entity(player_entity)?;
-                    let packet = Packet::new(EntityPositionVelocityPacket {
-                        id,
-                        x: position.x(),
-                        y: position.y(),
-                        velocity_x: velocity.velocity_x,
-                        velocity_y: velocity.velocity_y,
-                        force: true,
-                    })?;
-                    networking.send_packet(&packet, SendTarget::Connection(packet_event.conn.clone()))?;
-                }
+                position.set_x(packet.x);
+                position.set_y(packet.y);
+                tracing::trace!("adopted client pos: ({:.2},{:.2}) from ({:.2},{:.2})", reported.0, reported.1, current.0, current.1);
             }
         }
 
@@ -367,6 +350,7 @@ fn grant_starter_items(entities: &mut Entities, player_entity: hecs::Entity, ite
 /// therefore scaled by how far the player could plausibly have moved given its
 /// current speed, plus a fixed base and margin. A true teleport (large
 /// displacement at low speed) is still rejected.
+#[allow(dead_code)] // retained as a documented reference of the reconcile policy
 fn accept_reported_position(reported: (f32, f32), server: (f32, f32), velocity: (f32, f32)) -> bool {
     let dx = reported.0 - server.0;
     let dy = reported.1 - server.1;
