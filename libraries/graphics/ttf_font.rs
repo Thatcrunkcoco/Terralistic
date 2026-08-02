@@ -73,20 +73,30 @@ impl TtfFont {
     /// Renders `text` into a [`gfx::Surface`] at the font's pixel size.
     ///
     /// The surface's pixels are white with the glyph coverage in the alpha
-    /// channel, so it can be tinted via the texture color when drawn.
+    /// channel, so it can be tinted via the texture color when drawn. Glyphs
+    /// are baseline-aligned within a fixed line height, so the baseline stays
+    /// constant no matter which characters (short or tall) are rendered.
     pub fn render_text(&self, text: &str) -> gfx::Surface {
-        let (_, min_x, min_y, max_x, max_y) = self.text_bounds(text);
-        let size = gfx::IntSize((max_x - min_x).max(1.0) as u32, (max_y - min_y).max(1.0) as u32);
-        let mut surface = gfx::Surface::new(size);
         let scale_font = self.font.as_scaled(self.px_scale);
+        let ascent = scale_font.ascent();
+        // `\n` advances the pen by the full line height in `layout`, so size the
+        // surface for as many lines as the text has (otherwise multi-line text
+        // like /help output would be clipped to only its first line).
+        let line_step = scale_font.height();
+        let num_lines = text.chars().filter(|c| *c == '\n').count() as f32 + 1.0;
+        let height = (num_lines * line_step).ceil().max(1.0) as u32;
+        let (_, min_x, _, max_x, _) = self.text_bounds(text);
+        let width = (max_x - min_x).max(1.0) as u32;
+        let size = gfx::IntSize(width, height);
+        let mut surface = gfx::Surface::new(size);
 
         for glyph in self.layout(text) {
             if let Some(outlined) = scale_font.outline_glyph(glyph) {
                 let bounds = outlined.px_bounds();
-                // `draw` gives coordinates local to this glyph's pixel bounds,
-                // so offset them by the glyph's position relative to the canvas.
+                // `draw` gives coordinates local to this glyph's pixel bounds.
+                // Offset so the baseline of every glyph lands on the same row.
                 let offset_x = (bounds.min.x - min_x) as i32;
-                let offset_y = (bounds.min.y - min_y) as i32;
+                let offset_y = (ascent + bounds.min.y) as i32;
                 outlined.draw(|x, y, coverage| {
                     let px = offset_x + x as i32;
                     let py = offset_y + y as i32;

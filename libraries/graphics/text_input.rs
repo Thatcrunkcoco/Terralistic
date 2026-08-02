@@ -279,26 +279,26 @@ impl UiElement for TextInput {
         );
 
         if !self.text.is_empty() {
-            // Use a constant, font-derived height for vertical centering in
-            // terminal mode so the baseline doesn't shift as different-height
-            // characters are typed.
+            // Use a constant, font-derived height so the rendered text has a
+            // stable height (glyphs are baseline-aligned inside it).
             let text_render_height = if self.use_terminal_font {
                 self.terminal_display_line_height / graphics.real_scale()
             } else {
                 self.text_texture.get_texture_size().1 * self.text_scale(graphics)
             };
-            // nudge terminal text down a couple pixels for nicer optical alignment
-            let y_adjust = if self.use_terminal_font {
-                (self.text_scale(graphics) / self.terminal_zoom_compensation) * 0.5 / graphics.real_scale()
+            // anchor the text to the floor of the box (small bottom padding)
+            // so the baseline stays put instead of shifting with glyph height.
+            let floor_pad = if self.use_terminal_font {
+                self.text_scale(graphics) * 2.0 / graphics.real_scale()
             } else {
-                0.0
+                self.padding * self.text_scale(graphics)
             };
             self.text_texture.render(
                 graphics,
                 self.text_scale(graphics),
                 gfx::FloatPos(
                     rect.pos.0 + self.padding * self.text_scale(graphics),
-                    rect.pos.1 + rect.size.1 / 2.0 - text_render_height / 2.0 + y_adjust,
+                    rect.pos.1 + rect.size.1 - floor_pad - text_render_height,
                 ),
                 Some(src_rect),
                 false,
