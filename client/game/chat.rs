@@ -9,24 +9,28 @@ use gfx::{BaseUiElement, UiElement};
 
 pub struct ChatLine {
     texture: gfx::Texture,
-    back_rect: gfx::RenderRect,
     transparency: i32,
+    scale: f32,
 }
 
 impl ChatLine {
-    pub fn new(graphics: &gfx::GraphicsContext, text: &str, pos: gfx::FloatPos) -> Self {
-        let texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface(text, None));
-        let mut back_rect = gfx::RenderRect::new(pos + gfx::FloatPos(-texture.get_texture_size().0 * 3.0, -texture.get_texture_size().1 * 3.0), gfx::FloatSize(0.0, 0.0));
-        back_rect.smooth_factor = 1.0;
+    pub fn new(graphics: &gfx::GraphicsContext, text: &str) -> Self {
+        let (texture, scale) = if let Some(terminal_font) = graphics.terminal_font.as_ref() {
+            let surface = terminal_font.render_text(text);
+            (gfx::Texture::load_from_surface(&surface), 1.0)
+        } else {
+            let font = graphics.font_mono.as_ref().map_or(&graphics.font, |mono_font| mono_font);
+            (gfx::Texture::load_from_surface(&font.create_text_surface(text, None)), 2.0)
+        };
 
         Self {
             texture,
-            back_rect,
             transparency: 255,
+            scale,
         }
     }
 
-    pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, focused: bool) {
+    pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, pos: gfx::FloatPos, focused: bool) {
         let target_transparency = if focused { 255 } else { 0 };
 
         self.transparency = target_transparency;
@@ -35,19 +39,11 @@ impl ChatLine {
             return;
         }
 
-        let window_container = gfx::Container::default(graphics); //TODO this doesn't make sense
-        self.back_rect.update(graphics, &window_container);
-        self.back_rect.render(graphics, &window_container);
-        let pos = self.back_rect.get_container(graphics, &window_container).rect.pos;
-        self.texture.render(graphics, 3.0, pos, None, false, Some(gfx::Color::new(255, 255, 255, self.transparency as u8)));
-    }
-
-    pub fn set_pos(&mut self, pos: gfx::FloatPos) {
-        self.back_rect.pos = pos;
+        self.texture.render(graphics, self.scale, pos, None, false, Some(gfx::Color::new(255, 255, 255, self.transparency as u8)));
     }
 
     pub fn get_size(&self) -> gfx::FloatSize {
-        gfx::FloatSize(self.texture.get_texture_size().0 * 3.0, self.texture.get_texture_size().1 * 3.0)
+        gfx::FloatSize(self.texture.get_texture_size().0 * self.scale, self.texture.get_texture_size().1 * self.scale)
     }
 }
 
@@ -71,11 +67,20 @@ impl ClientChat {
         }
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self, graphics: &gfx::GraphicsContext) {
         self.text_input.orientation = gfx::BOTTOM_LEFT;
         self.text_input.pos = gfx::FloatPos(gfx::SPACING, -gfx::SPACING);
-        self.text_input.scale = 3.0;
         self.text_input.border_color = gfx::BORDER_COLOR;
+
+        // use the terminal font (natural size) when available, otherwise the
+        // pixel font scaled up.
+        if graphics.terminal_font.is_some() {
+            self.text_input.scale = 1.0;
+            self.text_input.use_terminal_font = true;
+        } else {
+            self.text_input.scale = 3.0;
+            self.text_input.use_terminal_font = false;
+        }
 
         self.back_rect.fill_color = gfx::TRANSPARENT;
         self.back_rect.orientation = gfx::BOTTOM_LEFT;
@@ -106,8 +111,7 @@ impl ClientChat {
         let mut curr_y = graphics.get_window_size().1 - gfx::SPACING - self.text_input.get_size().1;
         for line in self.chat_lines.iter_mut().rev() {
             curr_y -= line.get_size().1;
-            line.set_pos(gfx::FloatPos(gfx::SPACING, curr_y));
-            line.render(graphics, self.text_input.selected);
+            line.render(graphics, gfx::FloatPos(gfx::SPACING, curr_y), self.text_input.selected);
         }
     }
 
@@ -145,11 +149,7 @@ impl ClientChat {
             }
         } else if let Some(event) = event.downcast::<Packet>() {
             if let Some(packet) = event.try_deserialize::<ChatPacket>() {
-                self.chat_lines.push(ChatLine::new(
-                    graphics,
-                    &packet.message,
-                    gfx::FloatPos(0.0, graphics.get_window_size().1 - gfx::SPACING - self.text_input.get_size().1),
-                ));
+                self.chat_lines.push(ChatLine::new(graphics, &packet.message));
             }
         }
         Ok(self.is_selected() && event.downcast::<gfx::Event>().is_some())

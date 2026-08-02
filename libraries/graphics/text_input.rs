@@ -32,6 +32,9 @@ pub struct TextInput {
     cursor_rect: gfx::RenderRect,
     // text_processing is a closure, that takes a char and returns a char
     pub text_processing: Option<Box<dyn Fn(char) -> Option<char>>>,
+    // When true (and a terminal font is available) the input renders with the
+    // TTF terminal font instead of the default pixel font.
+    pub use_terminal_font: bool,
 }
 
 impl TextInput {
@@ -64,6 +67,7 @@ impl TextInput {
             cursor: (0, 0),
             cursor_rect,
             text_processing: None,
+            use_terminal_font: false,
         }
     }
 
@@ -96,7 +100,7 @@ impl TextInput {
 
     /// sets the hint text in the input box
     pub fn set_hint(&mut self, graphics: &gfx::GraphicsContext, hint: &str) {
-        self.hint_texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface(hint, None));
+        self.hint_texture = gfx::Texture::load_from_surface(&self.create_surface(graphics, hint, None));
     }
 
     /// returns the cursor in order
@@ -134,6 +138,37 @@ impl TextInput {
         }
         initial_pos
     }
+
+    /// Returns a surface for the given text using the terminal font when
+    /// enabled, falling back to the default font otherwise.
+    fn create_surface(&self, graphics: &gfx::GraphicsContext, text: &str, width_limit: Option<i32>) -> gfx::Surface {
+        if self.use_terminal_font {
+            if let Some(terminal_font) = graphics.terminal_font.as_ref() {
+                return terminal_font.render_text(text);
+            }
+        }
+        graphics.font.create_text_surface(text, width_limit)
+    }
+
+    /// Returns the size of the given text in pixels using the same font
+    /// resolution rules as `create_surface`.
+    fn get_text_size(&self, graphics: &gfx::GraphicsContext, text: &str) -> gfx::FloatSize {
+        if self.use_terminal_font {
+            if let Some(terminal_font) = graphics.terminal_font.as_ref() {
+                let size = terminal_font.measure(text);
+                return gfx::FloatSize(size.0 as f32, size.1 as f32);
+            }
+        }
+        let size = graphics.font.get_text_size(text, None);
+        gfx::FloatSize(size.0 as f32, size.1 as f32)
+    }
+
+    /// The scale used when drawing text. Terminal fonts are rasterized at
+    /// their target size so they render at scale 1, while the pixel font needs
+    /// the configured `scale` multiplier.
+    fn text_scale(&self) -> f32 {
+        if self.use_terminal_font { 1.0 } else { self.scale }
+    }
 }
 
 impl UiElement for TextInput {
@@ -152,7 +187,7 @@ impl UiElement for TextInput {
         let rect = container.get_absolute_rect();
 
         if self.text_changed && !self.text.is_empty() {
-            self.text_texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface(&self.text, None));
+            self.text_texture = gfx::Texture::load_from_surface(&self.create_surface(graphics, &self.text, None));
         }
 
         let hover_progress_target = if self.is_hovered(graphics, parent_container) { 1.0 } else { 0.0 };
@@ -203,10 +238,10 @@ impl UiElement for TextInput {
 
         self.hint_texture.render(
             graphics,
-            self.scale,
+            self.text_scale(),
             gfx::FloatPos(
-                rect.pos.0 + rect.size.0 / 2.0 - self.hint_texture.get_texture_size().0 / 2.0 * self.scale,
-                rect.pos.1 + self.padding * self.scale,
+                rect.pos.0 + rect.size.0 / 2.0 - self.hint_texture.get_texture_size().0 / 2.0 * self.text_scale(),
+                rect.pos.1 + self.padding * self.text_scale(),
             ),
             None,
             false,
@@ -216,10 +251,10 @@ impl UiElement for TextInput {
         if !self.text.is_empty() {
             self.text_texture.render(
                 graphics,
-                self.scale,
+                self.text_scale(),
                 gfx::FloatPos(
-                    rect.pos.0 + self.padding * self.scale,
-                    rect.pos.1 + rect.size.1 / 2.0 - self.text_texture.get_texture_size().1 * self.scale / 2.0,
+                    rect.pos.0 + self.padding * self.text_scale(),
+                    rect.pos.1 + rect.size.1 / 2.0 - self.text_texture.get_texture_size().1 * self.text_scale() / 2.0,
                 ),
                 Some(src_rect),
                 false,
@@ -228,31 +263,31 @@ impl UiElement for TextInput {
         }
 
         if self.text_changed || self.selected {
-            let texture_width = if self.text.is_empty() { 0.0 } else { self.text_texture.get_texture_size().0 * self.scale };
+            let texture_width = if self.text.is_empty() { 0.0 } else { self.text_texture.get_texture_size().0 * self.text_scale() };
 
-            let text_begin_x = f32::min(self.padding * self.scale, -self.padding * self.scale + rect.size.0 - texture_width);
+            let text_begin_x = f32::min(self.padding * self.text_scale(), -self.padding * self.text_scale() + rect.size.0 - texture_width);
 
             // w1 is the width of the text before the cursor.0
             let w1 = if self.get_cursor().0 == 0 {
                 0.0
             } else {
-                graphics.font.create_text_surface(self.text.get(..self.get_cursor().0).unwrap_or(""), None).get_size().0 as f32 * self.scale
+                self.get_text_size(graphics, self.text.get(..self.get_cursor().0).unwrap_or("")).0 * self.text_scale()
             };
 
             // w2 is the width of the text before the cursor.1
             let w2 = if self.get_cursor().1 == 0 {
                 0.0
             } else {
-                graphics.font.create_text_surface(self.text.get(..self.get_cursor().1).unwrap_or(""), None).get_size().0 as f32 * self.scale
+                self.get_text_size(graphics, self.text.get(..self.get_cursor().1).unwrap_or("")).0 * self.text_scale()
             };
 
             let x1 = text_begin_x + w1 - 3.0;
             let x2 = text_begin_x + w2 + 1.0;
 
             self.cursor_rect.pos.0 = x1;
-            self.cursor_rect.pos.1 = self.padding * self.scale;
+            self.cursor_rect.pos.1 = self.padding * self.text_scale();
             self.cursor_rect.size.0 = x2 - x1;
-            self.cursor_rect.size.1 = rect.size.1 - self.padding * self.scale * 2.0;
+            self.cursor_rect.size.1 = rect.size.1 - self.padding * self.text_scale() * 2.0;
 
             if self.cursor_rect.get_container(graphics, parent_container).rect.pos.0 == 0.0 && self.cursor_rect.get_container(graphics, parent_container).rect.pos.1 == 0.0 {
                 self.cursor_rect.jump_to_target();

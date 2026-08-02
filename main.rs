@@ -218,6 +218,7 @@ fn server_main(args: &[String]) {
             "Terralistic Server",
             include_bytes!("Build/Resources/font.opa"),
             Some(include_bytes!("Build/Resources/font_mono.opa")),
+            None,
         );
 
         let mut graphics;
@@ -276,7 +277,14 @@ fn server_main(args: &[String]) {
 }
 
 fn client_main() {
-    let graphics_result = gfx::init(1670, 1050, "Terralistic", include_bytes!("Build/Resources/font.opa"), None);
+    let graphics_result = gfx::init(
+        1670,
+        1050,
+        "Terralistic",
+        include_bytes!("Build/Resources/font.opa"),
+        Some(include_bytes!("Build/Resources/font_mono.opa")),
+        Some((include_bytes!("Build/Resources/terminal_font.ttf"), 28.0)),
+    );
 
     let mut graphics;
 

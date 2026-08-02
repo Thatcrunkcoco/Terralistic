@@ -44,12 +44,20 @@ pub struct GraphicsContext {
     prev_frame_time: std::time::Instant,
     pub font: Font,
     pub font_mono: Option<Font>,
+    pub terminal_font: Option<gfx::TtfFont>,
 }
 
 impl GraphicsContext {
     /// Initializes all the values needed for rendering.
     /// It usually fails because the system doesn't support graphics.
-    pub fn new(window_width: u32, window_height: u32, window_title: &str, font: &[u8], font_mono: Option<&[u8]>) -> Result<Self> {
+    pub fn new(
+        window_width: u32,
+        window_height: u32,
+        window_title: &str,
+        font: &[u8],
+        font_mono: Option<&[u8]>,
+        terminal_font_data: Option<(&'static [u8], f32)>,
+    ) -> Result<Self> {
         let sdl = sdl2::init();
         let sdl = sdl.map_err(|e| anyhow!(e))?;
         let video_subsystem = sdl.video();
@@ -86,6 +94,7 @@ impl GraphicsContext {
 
         let font = Font::new(font, false)?;
         let font_mono = if let Some(data) = font_mono { Some(Font::new(data, true)?) } else { None };
+        let terminal_font = if let Some((data, px_size)) = terminal_font_data { Some(gfx::TtfFont::new(data, px_size)?) } else { None };
 
         let mut result = Self {
             _gl_context: gl_context,
@@ -114,6 +123,7 @@ impl GraphicsContext {
             prev_frame_time: std::time::Instant::now(),
             font,
             font_mono,
+            terminal_font,
         };
 
         result.handle_window_resize();

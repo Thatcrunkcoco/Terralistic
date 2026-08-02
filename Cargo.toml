@@ -40,6 +40,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 backtrace = "0.3"
+ab_glyph = "0.2"
 
 # set custom dependency for windows
 [target.'cfg(windows)'.dependencies]
@@ -95,6 +96,7 @@ message-io = { version = "0.18", default-features = false, features = ["tcp"] }
 winres = "0.1"
 rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 kvptree = "0.1"
+ab_glyph = "0.2"
 
 # set custom dependency for windows
 [target.'cfg(windows)'.build-dependencies]

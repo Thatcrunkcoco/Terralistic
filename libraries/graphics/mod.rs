@@ -20,6 +20,7 @@ pub use texture::Texture;
 pub use texture_atlas::TextureAtlas;
 pub use theme::{BLACK, BLUR, BORDER_COLOR, DARK_GREY, GREY, LIGHT_GREY, SHADOW_INTENSITY, SPACING, TEXT_INPUT_WIDTH, TRANSPARENCY, TRANSPARENT, WHITE};
 pub use toggle::Toggle;
+pub use ttf_font::TtfFont;
 pub use ui_element::{BaseUiElement, UiElement};
 
 mod animation_timer;
@@ -47,10 +48,18 @@ mod texture_atlas;
 mod theme;
 mod toggle;
 mod transformation;
+mod ttf_font;
 mod ui_element;
 mod vertex_buffer;
 
 /// Initializes the graphics context.
-pub fn init(window_width: u32, window_height: u32, window_title: &str, default_font_data: &[u8], default_mono_font_data: Option<&[u8]>) -> Result<GraphicsContext> {
-    GraphicsContext::new(window_width, window_height, window_title, default_font_data, default_mono_font_data)
+pub fn init(
+    window_width: u32,
+    window_height: u32,
+    window_title: &str,
+    default_font_data: &[u8],
+    default_mono_font_data: Option<&[u8]>,
+    terminal_font_data: Option<(&'static [u8], f32)>,
+) -> Result<GraphicsContext> {
+    GraphicsContext::new(window_width, window_height, window_title, default_font_data, default_mono_font_data, terminal_font_data)
 }

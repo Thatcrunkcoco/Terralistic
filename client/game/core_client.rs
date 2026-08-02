@@ -123,7 +123,7 @@ pub fn run_game(
 
     pause_menu.init(graphics);
     debug_menu.init();
-    chat.init();
+    chat.init(graphics);
     respawn_screen.init(graphics);
 
     // print the time it took to initialize
