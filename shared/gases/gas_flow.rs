@@ -105,6 +105,11 @@ impl GasFlow {
     /// - `density` resolves a gas id to its density (supplied by the caller from
     ///   the gas registry), which drives vertical buoyancy. Empty cells (`GasId::NONE`)
     ///   are treated as density 0.
+    ///
+    /// The internal `#[allow(clippy::indexing_slicing)]` is safe: the scratch
+    /// buffers are always sized to the grid and every index used comes from
+    /// `translate` within verified bounds.
+    #[allow(clippy::indexing_slicing)]
     pub fn tick(
         &mut self,
         layer: &mut GasLayer,

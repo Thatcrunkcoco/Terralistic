@@ -11,6 +11,7 @@ use crate::client::game::debug_menu::DebugMenu;
 use crate::client::game::entities::ClientEntities;
 use crate::client::game::floating_text::FloatingTextManager;
 use crate::client::game::framerate_measurer::FramerateMeasurer;
+use crate::client::game::gases::ClientGases;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
 use crate::client::game::items::ClientItems;
@@ -60,13 +61,14 @@ pub fn run_game(
     let loading_text = Arc::new(Mutex::new("Loading".to_owned()));
     let loading_text2 = loading_text;
 
-    let temp_fn = || -> Result<(ClientModManager, ClientBlocks, ClientWalls, ClientEntities, ClientItems, ClientNetworking)> {
+    let temp_fn = || -> Result<(ClientModManager, ClientBlocks, ClientWalls, ClientEntities, ClientItems, ClientGases, ClientNetworking)> {
         "Loading mods".clone_into(&mut loading_text2.lock().unwrap_or_else(PoisonError::into_inner));
         let mut mods = ClientModManager::new();
         let mut blocks = ClientBlocks::new();
         let walls = ClientWalls::new(&mut blocks.get_blocks());
         let entities = ClientEntities::new();
         let mut items = ClientItems::new();
+        let gases = ClientGases::new();
 
         while let Some(event) = pre_events.pop_event() {
             mods.on_event(&event)?;
@@ -77,12 +79,13 @@ pub fn run_game(
 
         blocks.init(&items.get_items_arc(), &mut mods.mod_manager)?;
         walls.init(&mut mods.mod_manager)?;
+        gases.init(&mut mods.mod_manager)?;
         items.init(&mut mods.mod_manager, &entities.get_entities_arc())?;
 
         "Initializing mods".clone_into(&mut loading_text2.lock().unwrap_or_else(PoisonError::into_inner));
         mods.init()?;
 
-        anyhow::Ok((mods, blocks, walls, entities, items, networking))
+        anyhow::Ok((mods, blocks, walls, entities, items, gases, networking))
     };
     // if the init fails, we clear the loading text so the error can be displayed
     let result = temp_fn()?;
@@ -93,7 +96,10 @@ pub fn run_game(
     let mut walls = result.2;
     let entities = result.3;
     let mut items = result.4;
-    let mut networking = result.5;
+    let mut networking = result.6;
+    // The client keeps the gas registry alive for the lifetime of the session;
+    // flow simulation stays server-side for now.
+    let _gases = result.5;
 
     let mut background = Background::new();
     let mut inventory = ClientInventory::new();

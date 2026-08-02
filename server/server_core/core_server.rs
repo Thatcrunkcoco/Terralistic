@@ -20,6 +20,7 @@ use crate::shared::entities::{EntityId, HealthComponent, PositionComponent};
 
 use super::blocks::ServerBlocks;
 use super::commands::CommandManager;
+use super::gases::ServerGases;
 use super::mod_manager::ServerModManager;
 use super::networking::ServerNetworking;
 use super::walls::ServerWalls;
@@ -35,6 +36,7 @@ pub struct Server {
     networking: ServerNetworking,
     mods: ServerModManager,
     blocks: ServerBlocks,
+    gases: ServerGases,
     walls: ServerWalls,
     entities: ServerEntities,
     items: ServerItems,
@@ -60,6 +62,7 @@ impl Server {
             networking: ServerNetworking::new(port),
             mods: ServerModManager::new(Vec::new()),
             blocks,
+            gases: ServerGases::new(),
             walls,
             entities: ServerEntities::new(),
             items: ServerItems::new(),
@@ -181,6 +184,7 @@ impl Server {
         self.networking.init();
         self.blocks.init(&self.items.get_items_arc(), &mut self.mods.mod_manager)?;
         self.walls.init(&mut self.mods.mod_manager)?;
+        self.gases.init(&mut self.mods.mod_manager)?;
         self.items.init(&mut self.mods.mod_manager, &self.entities.get_entities_arc())?;
 
         let generator = WorldGenerator::new();
@@ -233,6 +237,9 @@ impl Server {
                 }
             }
         }
+
+        // Size the gas layer to the generated/loaded world and seed it with air.
+        self.gases.initialize_world(&self.blocks.get_blocks());
 
         self.set_state(ServerState::Running);
 
@@ -305,6 +312,7 @@ impl Server {
         self.mods.update()?;
         self.blocks.update(&mut self.events, delta_time)?;
         self.walls.update(delta_time, &mut self.events)?;
+        self.gases.update(&self.blocks.get_blocks());
         self.items.update(&mut self.events);
 
         // handle events
