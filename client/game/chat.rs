@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use anyhow::Result;
 
 use crate::client::game::networking::ClientNetworking;
@@ -12,7 +10,6 @@ use gfx::{BaseUiElement, UiElement};
 pub struct ChatLine {
     texture: gfx::Texture,
     back_rect: gfx::RenderRect,
-    creation_time: std::time::Instant,
     transparency: i32,
 }
 
@@ -20,26 +17,19 @@ impl ChatLine {
     pub fn new(graphics: &gfx::GraphicsContext, text: &str, pos: gfx::FloatPos) -> Self {
         let texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface(text, None));
         let mut back_rect = gfx::RenderRect::new(pos + gfx::FloatPos(-texture.get_texture_size().0 * 3.0, -texture.get_texture_size().1 * 3.0), gfx::FloatSize(0.0, 0.0));
-        back_rect.smooth_factor = 60.0;
+        back_rect.smooth_factor = 1.0;
 
         Self {
             texture,
             back_rect,
-            creation_time: std::time::Instant::now(),
             transparency: 255,
         }
     }
 
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, focused: bool) {
-        let target_transparency = if focused || (self.creation_time.elapsed().as_millis() as i32) < 5000 { 255 } else { 0 };
+        let target_transparency = if focused { 255 } else { 0 };
 
-        match self.transparency.cmp(&target_transparency) {
-            Ordering::Greater => self.transparency -= 10,
-            Ordering::Less => self.transparency += 10,
-            Ordering::Equal => {}
-        }
-
-        self.transparency = self.transparency.clamp(0, 255);
+        self.transparency = target_transparency;
 
         if self.transparency == 0 {
             return;
@@ -92,7 +82,7 @@ impl ClientChat {
         self.back_rect.pos = gfx::FloatPos(gfx::SPACING, -gfx::SPACING);
         self.back_rect.size.1 = self.text_input.get_size().1;
         self.back_rect.blur_radius = gfx::BLUR;
-        self.back_rect.smooth_factor = 60.0;
+        self.back_rect.smooth_factor = 1.0;
         self.back_rect.shadow_intensity = gfx::SHADOW_INTENSITY;
     }
 
