@@ -35,6 +35,12 @@ hecs = { version = "0.10", default-features = false, features = ["std"] }
 message-io = { version = "0.19", default-features = false, features = ["tcp"] }
 kvptree = { version = "0.1", default-features = false }
 
+# runtime debug logging + crash capture (only active with the --debug CLI flag)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+backtrace = "0.3"
+
 # set custom dependency for windows
 [target.'cfg(windows)'.dependencies]
 sdl2 = { version = "=0.38.0", features = ["bundled", "static-link"] }

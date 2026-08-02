@@ -187,25 +187,25 @@ pub mod client {
     pub mod settings;
 }
 
+mod debug_log;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    args.get(1).map_or_else(
-        || {
-            client_main();
-        },
-        |arg| {
-            if arg == "server" {
-                server_main(args.as_slice());
-            } else if arg == "client" {
-                client_main();
-            } else if arg == "version" {
-                println!("{}", shared::versions::VERSION);
-            } else {
-                println!("Invalid argument: {arg}");
-            }
-        },
-    );
+    // Enable runtime debug logging + crash capture when `--debug` is passed.
+    let _debug_log = debug_log::init(&args);
+
+    // Determine the run mode from the first non-flag argument. `--debug` is a
+    // toggle and must not be treated as the mode, otherwise the game would not
+    // launch when it is supplied.
+    let mode = args.iter().skip(1).find(|a| a.as_str() != "debug" && a.as_str() != "--debug");
+    match mode.map(String::as_str) {
+        None => client_main(),
+        Some("server") => server_main(args.as_slice()),
+        Some("client") => client_main(),
+        Some("version") => println!("{}", shared::versions::VERSION),
+        Some(other) => println!("Invalid argument: {other}"),
+    }
 }
 
 fn server_main(args: &[String]) {

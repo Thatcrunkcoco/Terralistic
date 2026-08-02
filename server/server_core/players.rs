@@ -127,10 +127,17 @@ impl ServerPlayers {
 
                 // Decide whether the client's reported position is acceptable based on
                 // how far it could plausibly have moved given its current speed.
-                if accept_reported_position((packet.x, packet.y), (position.x(), position.y()), (velocity.velocity_x, velocity.velocity_y)) {
+                let reported = (packet.x, packet.y);
+                let current = (position.x(), position.y());
+                let vel = (velocity.velocity_x, velocity.velocity_y);
+                if accept_reported_position(reported, current, vel) {
+                    tracing::trace!("accepted client pos: ({:.2},{:.2}) from ({:.2},{:.2}) vel=({:.2},{:.2})", reported.0, reported.1, current.0, current.1, vel.0, vel.1);
                     position.set_x(packet.x);
                     position.set_y(packet.y);
                 } else {
+                    // sent a forced correction (rubber-band) because client position
+                    // diverged too far from the server's authoritative position
+                    tracing::warn!("FORCING client pos: ({:.2},{:.2}) from ({:.2},{:.2}) vel=({:.2},{:.2})", current.0, current.1, reported.0, reported.1, vel.0, vel.1);
                     // send entity packet again but with force
                     let id = entities.get_id_from_entity(player_entity)?;
                     let packet = Packet::new(EntityPositionVelocityPacket {

@@ -117,7 +117,12 @@ impl ServerNetworking {
                     }
                 }
                 NetEvent::Message(peer, packet) => {
-                    let packet: Packet = bincode::deserialize(packet).expect("Failed to deserialize");
+                    // A malformed packet must not abort the process (panic = "abort"
+                    // would kill the whole game); skip it instead.
+                    let Ok(packet): Result<Packet, _> = bincode::deserialize(packet) else {
+                        println!("Failed to deserialize a packet from {peer}");
+                        return;
+                    };
                     if let Some(packet) = packet.try_deserialize::<NamePacket>() {
                         print_to_console(&format!("[{:?}] joined the game", packet.name), 0);
                         match event_sender.send(Event::new(NewConnectionEvent {
@@ -148,7 +153,10 @@ impl ServerNetworking {
                 }
 
                 while let Ok((packet_data, conn)) = packet_receiver.try_recv() {
-                    Self::send_packet_internal(&handler, &packet_data, &conn).expect("Failed to send Packet");
+                    if let Err(e) = Self::send_packet_internal(&handler, &packet_data, &conn) {
+                        // log and continue rather than abort (panic = "abort" would kill the whole process)
+                        println!("Failed to send packet to {}: {e}", conn.address);
+                    }
                 }
 
                 handler.signals().send_with_timer((), std::time::Duration::from_millis(1));
