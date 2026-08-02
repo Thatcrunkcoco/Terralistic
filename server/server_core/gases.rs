@@ -86,9 +86,10 @@ impl ServerGases {
 
     /// Seeds the sealed gas demonstration room in the "test" world with the
     /// declared gas types so the debug overlay has layered content to visualize.
-    /// The room interior is x in [382..470], y in [91..172] (matching the solid
-    /// box built in `WorldGenerator::generate_test`). We stack gases vertically
-    /// and deliberately invert them so the flow re-layers them by density.
+    /// The room interior is x in [498..503], y in [174..179] (5x5, matching the
+    /// compact stone box built in `WorldGenerator::generate_test`). With only
+    /// five rows we use relative bands (top heavy, middle air, bottom light) and
+    /// deliberately invert them so the flow re-layers them by density.
     pub fn seed_test_gases(&mut self) {
         let (width, height) = self.layer.get_size();
         if width == 0 || height == 0 {
@@ -103,17 +104,16 @@ impl ServerGases {
         let co2 = id_of("co2").unwrap_or(GasId::NONE);
         let oxygen = id_of("oxygen").unwrap_or(GasId::NONE);
 
-        const X0: i32 = 382;
-        const X1: i32 = 470;
-        const Y0: i32 = 91;
-        const Y1: i32 = 172;
+        const X0: i32 = 498;
+        const X1: i32 = 503;
+        const Y0: i32 = 174;
+        const Y1: i32 = 179;
 
         for y in Y0..Y1 {
-            // Center band is breathable air.
-            let gas = if y < 100 {
-                // top band: carbon dioxide (heavy) — will settle to the bottom
+            // Top band: carbon dioxide (heavy) — will settle to the bottom.
+            let gas = if y < Y0 + 2 {
                 co2
-            } else if y < 166 {
+            } else if y < Y1 - 1 {
                 // middle band: air
                 air
             } else {
@@ -130,8 +130,8 @@ impl ServerGases {
         }
         // a small pocket of pure oxygen near the center for contrast
         if !oxygen.is_none() {
-            for x in 400..440 {
-                for y in 120..140 {
+            for x in 500..502 {
+                for y in 176..177 {
                     let _ = self.layer.set_cell(x, y, GasCell::new(oxygen, 150.0));
                     self.flow.activate(x as u32, y as u32, width, height);
                 }

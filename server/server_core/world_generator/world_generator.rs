@@ -467,31 +467,43 @@ impl WorldGenerator {
             place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
-        // --- Gas demonstration room: a sealed, solid box floating in the air. ---
-        // It is intentionally solid (stone_block) so gases are contained. The
-        // matching cell coordinates live in `ServerGases::seed_test_gases`, which
-        // fills the interior with the declared gas types after the layer is built.
-        // (386..466, 96..166) is the interior; the box is 4 blocks of wall around it.
-        for x in 380..472 {
-            for y in 88..174 {
-                // clear anything that was already here (trees overlap the span)
+        // --- Gas demonstration room: a compact 5x5 sealed stone box. ---
+        // Interior spans x in [498..503], y in [174..179] (5 wide x 5 tall) and
+        // is intentionally solid (stone_block) so gases are contained. Matching
+        // cell coordinates live in `ServerGases::seed_test_gases`. Staircases on
+        // both sides step up and over the top so the player can peek in (the
+        // debug overlay renders straight through solid blocks).
+        //
+        // Box footprint (x in [489..511]) is cleared first so trees don't
+        // overlap it, then the walls, staircases, and interior are built.
+        for x in 489..511 {
+            for y in 170..181 {
                 block_terrain[x as usize][y as usize] = air;
                 wall_terrain[x as usize][y as usize] = walls.clear;
             }
         }
-        for x in 380..472 {
-            for y in [88, 90, 172, 174] {
+        // Left + right wall columns (1 block thick), floor at y=179, ceiling at y=173.
+        for x in [497, 503] {
+            for y in 173..180 {
                 tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
             }
-            // inner-frame for the side walls
-            tset(&mut block_terrain, x, 89, width, height_u as i32, stone_block);
-            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
         }
-        for y in 89..174 {
-            tset(&mut block_terrain, 380, y, width, height_u as i32, stone_block);
-            tset(&mut block_terrain, 381, y, width, height_u as i32, stone_block);
-            tset(&mut block_terrain, 470, y, width, height_u as i32, stone_block);
-            tset(&mut block_terrain, 471, y, width, height_u as i32, stone_block);
+        // Floor and ceiling slabs across the interior.
+        for x in 498..503 {
+            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
+        }
+        // Left staircase ascending from ground up over the left wall.
+        for i in 0..8 {
+            let x = 489 + i;
+            let y = 179 - i;
+            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+        }
+        // Right staircase descending from the right wall back down to ground.
+        for i in 0..7 {
+            let x = 504 + i;
+            let y = 173 + i;
+            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
         }
 
         blocks.create_from_block_ids(&block_terrain)?;
