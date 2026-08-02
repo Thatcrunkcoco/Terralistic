@@ -312,7 +312,7 @@ impl Server {
         self.mods.update()?;
         self.blocks.update(&mut self.events, delta_time)?;
         self.walls.update(delta_time, &mut self.events)?;
-        self.gases.update(&self.blocks.get_blocks());
+        self.gases.update(&self.blocks.get_blocks(), &mut self.networking)?;
         self.items.update(&mut self.events);
 
         // handle events
@@ -411,6 +411,7 @@ impl Server {
                 &mut self.mods.mod_manager,
             )?;
             self.walls.on_event(&event, &mut self.networking)?;
+            self.gases.on_event(&event, &mut self.networking)?;
             self.items.on_event(&event, &mut self.entities.get_entities(), &mut self.events, &mut self.networking)?;
             self.players
                 .on_event(&event, &mut self.entities.get_entities(), &self.blocks, &mut self.networking, &mut self.events, &self.items.get_items())?;

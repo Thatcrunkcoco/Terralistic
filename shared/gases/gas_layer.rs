@@ -28,6 +28,28 @@ impl GasCell {
     }
 }
 
+/// Sent from server to client once on connection, carrying the full gas layer
+/// (snap-compressed by [`GasLayer::serialize`]) so the client has the initial
+/// atmosphere to render the debug overlay.
+#[derive(serde_derive::Serialize, serde_derive::Deserialize)]
+pub struct GasLayerWelcomePacket {
+    pub data: Vec<u8>,
+}
+
+/// Sent periodically from server to client while the gas debug visualizer is
+/// enabled, carrying a fresh snapshot of the full gas layer.
+#[derive(serde_derive::Serialize, serde_derive::Deserialize)]
+pub struct GasLayerUpdatePacket {
+    pub data: Vec<u8>,
+}
+
+/// Sent from client to server to request (or stop) periodic gas layer updates
+/// for the debug visualizer. Only ever used from the debug client.
+#[derive(serde_derive::Serialize, serde_derive::Deserialize)]
+pub struct ClientRequestGasDebugPacket {
+    pub enabled: bool,
+}
+
 /// A dense 2D layer of gas cells, sized to the world like the block array.
 ///
 /// Cells are stored in a contiguous `Vec` indexed by the world's
@@ -124,6 +146,18 @@ impl GasLayer {
     #[must_use]
     pub fn pressure_by_index(&self, index: usize) -> f32 {
         self.get_cell_by_index(index).pressure
+    }
+
+    /// Serializes the gas layer (snap-compressed) for transport over the network.
+    /// Compresses because a dense world layer is large but highly coherent.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        Ok(snap::raw::Encoder::new().compress_vec(&bincode::serialize(self)?)?)
+    }
+
+    /// Deserializes a layer previously produced by [`GasLayer::serialize`].
+    pub fn deserialize(&mut self, serial: &[u8]) -> Result<()> {
+        *self = bincode::deserialize(&snap::raw::Decoder::new().decompress_vec(serial)?)?;
+        Ok(())
     }
 }
 

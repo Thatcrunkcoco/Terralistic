@@ -11,6 +11,7 @@ use crate::client::game::debug_menu::DebugMenu;
 use crate::client::game::entities::ClientEntities;
 use crate::client::game::floating_text::FloatingTextManager;
 use crate::client::game::framerate_measurer::FramerateMeasurer;
+use crate::client::game::gas_debug_overlay::GasDebugOverlay;
 use crate::client::game::gases::ClientGases;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
@@ -97,9 +98,7 @@ pub fn run_game(
     let entities = result.3;
     let mut items = result.4;
     let mut networking = result.6;
-    // The client keeps the gas registry alive for the lifetime of the session;
-    // flow simulation stays server-side for now.
-    let _gases = result.5;
+    let mut gases = result.5;
 
     let mut background = Background::new();
     let mut inventory = ClientInventory::new();
@@ -110,6 +109,7 @@ pub fn run_game(
     let mut block_selector = BlockSelector::new();
     let mut pause_menu = PauseMenu::new(graphics, settings.clone(), global_settings.clone());
     let mut debug_menu = DebugMenu::new();
+    let mut gas_debug_overlay = GasDebugOverlay::new();
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -172,6 +172,7 @@ pub fn run_game(
         walls.render(graphics, &camera, &frame_timer)?;
         blocks.render(graphics, &camera /*&frame_timer*/)?;
         players.render(graphics, &mut entities.get_entities(), &camera);
+        gas_debug_overlay.render(graphics, &gases, &camera)?;
         items.render(graphics, &camera, &mut entities.get_entities())?;
         floating_text.render(graphics, &camera);
         lights.render(graphics, &camera, &blocks.get_blocks(), settings, &frame_timer)?;
@@ -201,6 +202,7 @@ pub fn run_game(
             mods.on_event(&event)?;
             blocks.on_event(&event, &mut events, &mut networking)?;
             walls.on_event(&event)?;
+            gases.on_event(&event)?;
             entities.on_event(&event, &mut events, &players, &mut networking)?;
             items.on_event(&event, &mut entities.get_entities(), &mut events)?;
             block_selector.on_event(graphics, &mut networking, &camera, &event, &mut events)?;
@@ -212,6 +214,7 @@ pub fn run_game(
                 break 'main_loop;
             }
             debug_menu.on_event(&event);
+            gas_debug_overlay.on_event(&event, &mut gases, &mut networking)?;
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
 

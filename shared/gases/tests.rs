@@ -160,6 +160,26 @@ mod tests {
         assert_eq!(decoded.get_cell(0, 0).unwrap().gas, o2);
     }
 
+    #[test]
+    fn gas_layer_snap_serialize_round_trip() {
+        let mut layer = GasLayer::new();
+        let air = GasId::from_raw(0);
+        let co2 = GasId::from_raw(1);
+        layer.create((40, 20), air, 100.0);
+        // sprinkle a second gas so compression exercises mixed content
+        layer.set_cell(10, 15, GasCell::new(co2, 250.0)).unwrap();
+
+        let bytes = layer.serialize().unwrap();
+        let mut decoded = GasLayer::new();
+        decoded.deserialize(&bytes).unwrap();
+
+        assert_eq!(decoded.get_size(), (40, 20));
+        assert_eq!(decoded.get_cell(10, 15).unwrap().gas, co2);
+        assert_eq!(decoded.get_cell(10, 15).unwrap().pressure, 250.0);
+        assert_eq!(decoded.get_cell(1, 1).unwrap().gas, air);
+        assert_eq!(decoded.get_cell(1, 1).unwrap().pressure, 100.0);
+    }
+
     // --- GasFlow tests ---
 
     use crate::shared::gases::{GasFlow, GasFlowParams};

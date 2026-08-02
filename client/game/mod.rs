@@ -9,6 +9,7 @@ mod debug_menu;
 mod entities;
 mod floating_text;
 mod framerate_measurer;
+mod gas_debug_overlay;
 mod gases;
 mod health;
 mod inventory;
