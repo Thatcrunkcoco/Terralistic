@@ -5,24 +5,82 @@ a Rust engine at its core and **Lua mods** as the content/definition layer. Sing
 runs both the server and client in one process over localhost; multiplayer uses the
 same authoritative server for friends to join.
 
-## Synopsis
+> **Note:** the section below is **high-level creative direction** — the intended
+> vision for where Terralistic is heading. It is not a spec of what's implemented
+> today. For the current technical state, see the [Architecture](#architecture) and
+> [Core Systems](#core-systems) sections further down.
 
-Terralistic is a block-based sandbox game that blends two distinct design pillars:
-the **world exploration and boss-fight progression of Terraria** with the **deep,
-survival-engineering mechanics of Oxygen Not Included**.
+---
 
-- **From Terraria** — a vast, procedurally generated world meant to be explored and
-  conquered. Dig deep, travel far, seek out materials, and face progressively harder
-  bosses that gate access to new tiers of gear and content. Progression is driven by
-  *what you go out and find*.
-- **From Oxygen Not Included** — a rich, systemic simulation under the surface. A
-  base is more than a pretty structure: it must *breathe*, *eat*, and *not collapse*.
-  Expect layered mechanics around gases, liquids, temperature, power, and resource
-  loops that reward careful base design and planning.
+## Creative Direction
 
-The player is the bridge between the two: you must explore and fight to gather what
-your base needs to survive, and you must design a base robust enough to fuel the
-deeper expeditions that progression demands.
+### The Premise
+
+You are a person who has **crash-landed on an alien planet**. Where the ship comes to
+rest, you carve out a small, contained pocket of breathable air — a fragile foothold
+against an environment that is not made for you. From there, everything is about
+**growing outward**: expanding your base, pumping air and water into new spaces,
+pushing into hostile territory, and climbing the ladder of materials, machines, and
+bosses that leads first off-world, and eventually to other planets entirely.
+
+### Two Design Pillars
+
+Terralistic blends two distinct pillars of block-based game design:
+
+- **From Terraria — exploration & progression.** A vast, procedurally generated
+  world meant to be explored and conquered. Dig deep, travel far, seek out rare
+  materials, and face progressively harder bosses that gate access to new tiers of
+  gear and content. Progression is driven by *what you go out and find*.
+- **From Oxygen Not Included — deep survival engineering.** A rich, systemic
+  simulation under the surface. A base is far more than a pretty structure: it must
+  *breathe*, *eat*, and *not collapse*. Layered mechanics around gases, liquids,
+  temperature, power, and resource loops reward careful base design and planning.
+
+### The Bridge
+
+The defining hook of Terralistic is the connection between the two pillars. The
+player is the bridge: you must **explore and fight** to gather what your base needs
+to survive, and you must **design a base** robust enough to fuel the deeper
+expeditions that progression demands.
+
+Neither pillar can be skipped. Exploration without a capable base stalls; a base
+without exploration runs dry.
+
+### The Progression Ladder
+
+The crash-landing framing gives the game a clean, tiered arc — each tier is a new
+domain to breathe in, new materials to find, a new set of base systems to master, and
+(or shortly after) a boss to overcome:
+
+| Tier | Domain | What unlocks |
+|------|--------|--------------|
+| **1 — Crash Site** | A small breathable pocket of air | Contained base; manage the air you landed with |
+| **2 — Local Expansion** | Tunnels & caves just beyond the pocket | Air plumbing, pumps, sealed doors, gas mining |
+| **3 — Hostile Biomes** | Deep caves, flooded zones, heat & toxin areas | Temperature control, fluid transport, pressure suits |
+| **4 — The Planet** | The planet's full surface & biomes | Power grid, refining chains, automation |
+| **5 — Orbital** | Space station / low orbit | Rocket construction, launch pads, orbital staging |
+| **6 — Multi-planet** | Other planets with different atmospheres & fluids | Interplanetary cargo, fluid & item transport, resource export |
+
+### Bosses as Gates
+
+Bosses should be more than damage checks — each one should force a meaningful **base
+upgrade**. For example: defeat a boss to unlock the pump, which lets you drain a
+flooded biome, which contains the next material, which enables the next rocket
+component. In this way, bosses bind the two pillars together rather than standing
+apart from them.
+
+### Multi-Planetary Endgame
+
+The long-term horizon is a **multi-planetary game**: a rocket system, item transport,
+and fluid transport between planets — each planet effectively a fresh systemic world
+of its own, with new atmospheres, new fluids, perhaps new gravity, and their own
+bosses and exploration.
+
+### The Player-Facing Loop
+
+In short: **you explore and fight to supply your base; you build a better base to
+fuel the deeper expeditions that progression demands.** Start small and contained.
+Breathe. Then expand — until the sky is not the limit.
 
 ---
 
