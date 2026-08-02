@@ -93,6 +93,38 @@ impl GasLayer {
     pub fn cells(&self) -> &[GasCell] {
         &self.cells
     }
+
+    /// Returns the cell at a raw dense index. Intended for hot-path systems
+    /// (flow simulation, rendering) that already hold a translated index.
+    pub fn get_cell_by_index(&self, index: usize) -> GasCell {
+        // cannot panic: cells vector is always the size of the map
+        #[allow(clippy::indexing_slicing)]
+        {
+            self.cells[index]
+        }
+    }
+
+    /// Sets the cell at a raw dense index. Intended for hot-path systems that
+    /// already hold a translated index.
+    pub fn set_cell_by_index(&mut self, index: usize, cell: GasCell) {
+        // cannot panic: cells vector is always the size of the map
+        #[allow(clippy::indexing_slicing)]
+        {
+            self.cells[index] = cell;
+        }
+    }
+
+    /// The gas id at a raw dense index.
+    #[must_use]
+    pub fn gas_by_index(&self, index: usize) -> GasId {
+        self.get_cell_by_index(index).gas
+    }
+
+    /// The pressure at a raw dense index.
+    #[must_use]
+    pub fn pressure_by_index(&self, index: usize) -> f32 {
+        self.get_cell_by_index(index).pressure
+    }
 }
 
 impl Default for GasLayer {

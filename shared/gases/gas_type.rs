@@ -50,6 +50,11 @@ pub struct GasId {
 }
 
 impl GasId {
+    /// The reserved id used for an *empty* / vacuum cell (pressure zero, no gas).
+    /// This is distinct from the `-1` unregistered placeholder: `-1` means "no
+    /// valid id yet" while `NONE` is a real, meaningful state meaning "no gas".
+    pub const NONE: GasId = GasId { id: -2 };
+
     /// Constructs a gas id from a raw registry index. Used by systems that
     /// reconstruct gas references from resolved/serialized data.
     #[must_use]
@@ -61,5 +66,11 @@ impl GasId {
     #[must_use]
     pub const fn raw(self) -> i32 {
         self.id
+    }
+
+    /// Whether this id represents an empty / vacuum cell.
+    #[must_use]
+    pub const fn is_none(self) -> bool {
+        self.id == Self::NONE.id
     }
 }
