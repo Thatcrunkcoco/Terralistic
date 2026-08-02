@@ -39,11 +39,14 @@ impl ChatLine {
             return;
         }
 
-        self.texture.render(graphics, self.scale, pos, None, false, Some(gfx::Color::new(255, 255, 255, self.transparency as u8)));
+        // scale by 1/real_scale so the text is a constant on-screen size
+        // regardless of the UI zoom setting.
+        self.texture.render(graphics, self.scale / graphics.real_scale(), pos, None, false, Some(gfx::Color::new(255, 255, 255, self.transparency as u8)));
     }
 
-    pub fn get_size(&self) -> gfx::FloatSize {
-        gfx::FloatSize(self.texture.get_texture_size().0 * self.scale, self.texture.get_texture_size().1 * self.scale)
+    pub fn get_size(&self, graphics: &gfx::GraphicsContext) -> gfx::FloatSize {
+        let inv = 1.0 / graphics.real_scale();
+        gfx::FloatSize(self.texture.get_texture_size().0 * self.scale * inv, self.texture.get_texture_size().1 * self.scale * inv)
     }
 }
 
@@ -94,20 +97,27 @@ impl ClientChat {
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext) {
         let window_container = gfx::Container::default(graphics);
         let window_size = graphics.get_window_size();
+        let inv_scale = 1.0 / graphics.real_scale();
         if self.visible {
-            self.back_rect.size.0 = window_size.0 - gfx::SPACING * 2.0;
+            // full window width with a constant on-screen margin
+            self.text_input.width = window_size.0 * graphics.real_scale() - gfx::SPACING * 2.0;
+
+            // box size is already compensated to a constant on-screen size
+            let box_size = self.text_input.get_size();
+            self.back_rect.size.0 = box_size.0;
+            self.back_rect.size.1 = box_size.1;
 
             self.back_rect.update(graphics, &window_container);
             self.back_rect.render(graphics, &window_container);
 
-            self.text_input.width = (window_size.0 - gfx::SPACING * 2.0) / self.text_input.scale;
             self.text_input.update(graphics, &window_container);
             self.text_input.render(graphics, &window_container);
         }
 
-        let mut curr_y = window_size.1 - gfx::SPACING - self.text_input.get_size().1;
+        let input_height = self.text_input.get_size().1;
+        let mut curr_y = window_size.1 - gfx::SPACING * inv_scale - input_height;
         for line in self.chat_lines.iter_mut().rev() {
-            curr_y -= line.get_size().1;
+            curr_y -= line.get_size(graphics).1;
             line.render(graphics, gfx::FloatPos(gfx::SPACING, curr_y), self.text_input.selected);
         }
     }

@@ -327,6 +327,14 @@ impl GraphicsContext {
         gfx::FloatSize(self.sdl_window.size().0 as f32 / self.real_scale, self.sdl_window.size().1 as f32 / self.real_scale)
     }
 
+    /// The current UI zoom factor currently in effect (animates toward
+    /// `scale`). 1.0 means no zoom. Multiplying a "scaled unit" by this gives
+    /// the equivalent on-screen pixels.
+    #[must_use]
+    pub fn real_scale(&self) -> f32 {
+        self.real_scale
+    }
+
     /// Gets mouse position
     #[must_use]
     pub fn get_mouse_pos(&self) -> gfx::FloatPos {

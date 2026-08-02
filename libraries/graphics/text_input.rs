@@ -35,6 +35,9 @@ pub struct TextInput {
     // When true (and a terminal font is available) the input renders with the
     // TTF terminal font instead of the default pixel font.
     pub use_terminal_font: bool,
+    // Set each frame for terminal mode: 1/real_scale so the box stays a
+    // constant on-screen size regardless of the UI zoom.
+    terminal_zoom_compensation: f32,
 }
 
 impl TextInput {
@@ -68,12 +71,16 @@ impl TextInput {
             cursor_rect,
             text_processing: None,
             use_terminal_font: false,
+            terminal_zoom_compensation: 1.0,
         }
     }
 
     #[must_use]
     pub fn get_size(&self) -> gfx::FloatSize {
-        gfx::FloatSize((self.width) * self.scale, (self.text_texture.get_texture_size().1 + self.padding * 2.0) * self.scale)
+        gfx::FloatSize(
+            (self.width) * self.scale * self.terminal_zoom_compensation,
+            (self.text_texture.get_texture_size().1 + self.padding * 2.0) * self.scale * self.terminal_zoom_compensation,
+        )
     }
 
     /// Checks if the button is hovered with a mouse
@@ -164,10 +171,11 @@ impl TextInput {
     }
 
     /// The scale used when drawing text. Terminal fonts are rasterized at
-    /// their target size so they render at scale 1, while the pixel font needs
+    /// their target size and rendered with `1/real_scale` so they stay a
+    /// constant on-screen size regardless of the UI zoom. The pixel font uses
     /// the configured `scale` multiplier.
-    fn text_scale(&self) -> f32 {
-        if self.use_terminal_font { 1.0 } else { self.scale }
+    fn text_scale(&self, graphics: &gfx::GraphicsContext) -> f32 {
+        if self.use_terminal_font { 1.0 / graphics.real_scale() } else { self.scale }
     }
 }
 
@@ -183,6 +191,7 @@ impl UiElement for TextInput {
     /// renders the text input
     #[allow(clippy::too_many_lines)] // TODO: split this function up
     fn render_inner(&mut self, graphics: &mut gfx::GraphicsContext, parent_container: &gfx::Container) {
+        self.terminal_zoom_compensation = if self.use_terminal_font { 1.0 / graphics.real_scale() } else { 1.0 };
         let container = self.get_container(graphics, parent_container);
         let rect = container.get_absolute_rect();
 
@@ -238,10 +247,10 @@ impl UiElement for TextInput {
 
         self.hint_texture.render(
             graphics,
-            self.text_scale(),
+            self.text_scale(graphics),
             gfx::FloatPos(
-                rect.pos.0 + rect.size.0 / 2.0 - self.hint_texture.get_texture_size().0 / 2.0 * self.text_scale(),
-                rect.pos.1 + self.padding * self.text_scale(),
+                rect.pos.0 + rect.size.0 / 2.0 - self.hint_texture.get_texture_size().0 / 2.0 * self.text_scale(graphics),
+                rect.pos.1 + self.padding * self.text_scale(graphics),
             ),
             None,
             false,
@@ -251,10 +260,10 @@ impl UiElement for TextInput {
         if !self.text.is_empty() {
             self.text_texture.render(
                 graphics,
-                self.text_scale(),
+                self.text_scale(graphics),
                 gfx::FloatPos(
-                    rect.pos.0 + self.padding * self.text_scale(),
-                    rect.pos.1 + rect.size.1 / 2.0 - self.text_texture.get_texture_size().1 * self.text_scale() / 2.0,
+                    rect.pos.0 + self.padding * self.text_scale(graphics),
+                    rect.pos.1 + rect.size.1 / 2.0 - self.text_texture.get_texture_size().1 * self.text_scale(graphics) / 2.0,
                 ),
                 Some(src_rect),
                 false,
@@ -263,31 +272,31 @@ impl UiElement for TextInput {
         }
 
         if self.text_changed || self.selected {
-            let texture_width = if self.text.is_empty() { 0.0 } else { self.text_texture.get_texture_size().0 * self.text_scale() };
+            let texture_width = if self.text.is_empty() { 0.0 } else { self.text_texture.get_texture_size().0 * self.text_scale(graphics) };
 
-            let text_begin_x = f32::min(self.padding * self.text_scale(), -self.padding * self.text_scale() + rect.size.0 - texture_width);
+            let text_begin_x = f32::min(self.padding * self.text_scale(graphics), -self.padding * self.text_scale(graphics) + rect.size.0 - texture_width);
 
             // w1 is the width of the text before the cursor.0
             let w1 = if self.get_cursor().0 == 0 {
                 0.0
             } else {
-                self.get_text_size(graphics, self.text.get(..self.get_cursor().0).unwrap_or("")).0 * self.text_scale()
+                self.get_text_size(graphics, self.text.get(..self.get_cursor().0).unwrap_or("")).0 * self.text_scale(graphics)
             };
 
             // w2 is the width of the text before the cursor.1
             let w2 = if self.get_cursor().1 == 0 {
                 0.0
             } else {
-                self.get_text_size(graphics, self.text.get(..self.get_cursor().1).unwrap_or("")).0 * self.text_scale()
+                self.get_text_size(graphics, self.text.get(..self.get_cursor().1).unwrap_or("")).0 * self.text_scale(graphics)
             };
 
             let x1 = text_begin_x + w1 - 3.0;
             let x2 = text_begin_x + w2 + 1.0;
 
             self.cursor_rect.pos.0 = x1;
-            self.cursor_rect.pos.1 = self.padding * self.text_scale();
+            self.cursor_rect.pos.1 = self.padding * self.text_scale(graphics);
             self.cursor_rect.size.0 = x2 - x1;
-            self.cursor_rect.size.1 = rect.size.1 - self.padding * self.text_scale() * 2.0;
+            self.cursor_rect.size.1 = rect.size.1 - self.padding * self.text_scale(graphics) * 2.0;
 
             if self.cursor_rect.get_container(graphics, parent_container).rect.pos.0 == 0.0 && self.cursor_rect.get_container(graphics, parent_container).rect.pos.1 == 0.0 {
                 self.cursor_rect.jump_to_target();
