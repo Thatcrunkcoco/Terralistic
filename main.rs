@@ -199,10 +199,11 @@ fn main() {
     // toggle and must not be treated as the mode, otherwise the game would not
     // launch when it is supplied.
     let mode = args.iter().skip(1).find(|a| a.as_str() != "debug" && a.as_str() != "--debug");
+    let debug = debug_log::requested(&args);
     match mode.map(String::as_str) {
-        None => client_main(),
+        None => client_main(debug),
         Some("server") => server_main(args.as_slice()),
-        Some("client") => client_main(),
+        Some("client") => client_main(debug),
         Some("version") => println!("{}", shared::versions::VERSION),
         Some(other) => println!("Invalid argument: {other}"),
     }
@@ -276,7 +277,7 @@ fn server_main(args: &[String]) {
     }
 }
 
-fn client_main() {
+fn client_main(debug: bool) {
     let graphics_result = gfx::init(
         1670,
         1050,
@@ -312,7 +313,7 @@ fn client_main() {
     let global_settings = Rc::new(RefCell::new(GlobalSettings::new()));
     global_settings.borrow_mut().init(&settings);
     global_settings.borrow_mut().update(&mut graphics, &settings);
-    run_title_screen(&mut graphics, &settings, &global_settings);
+    run_title_screen(&mut graphics, &settings, &global_settings, debug);
 
     global_settings.borrow_mut().stop(&settings);
 

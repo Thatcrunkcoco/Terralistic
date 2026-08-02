@@ -60,10 +60,10 @@ impl MenuRenderer {
     }
 }
 
-pub fn run_title_screen(graphics: &mut gfx::GraphicsContext, settings: &Rc<RefCell<Settings>>, global_settings: &Rc<RefCell<GlobalSettings>>) {
+pub fn run_title_screen(graphics: &mut gfx::GraphicsContext, settings: &Rc<RefCell<Settings>>, global_settings: &Rc<RefCell<GlobalSettings>>, debug: bool) {
     let open_secondary_menu: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
     let mut menus = MenuRenderer {
-        main_menu: MainMenu::new(graphics, &open_secondary_menu),
+        main_menu: MainMenu::new(graphics, &open_secondary_menu, debug),
         secondary_menu: SecondaryMenu::None,
         state: TitleScreenState::MainMenu,
     };

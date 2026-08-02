@@ -6,7 +6,6 @@ use std::rc::Rc;
 
 pub struct MainMenu {
     title: gfx::Sprite,
-    #[allow(dead_code)]
     debug_title: gfx::Sprite,
     version: gfx::Sprite,
     singleplayer_button: gfx::Button,
@@ -17,7 +16,7 @@ pub struct MainMenu {
 }
 
 impl MainMenu {
-    pub fn new(graphics: &gfx::GraphicsContext, open_menu: &Rc<Cell<Option<usize>>>) -> Self {
+    pub fn new(graphics: &gfx::GraphicsContext, open_menu: &Rc<Cell<Option<usize>>>, debug: bool) -> Self {
         let copied_menu = open_menu.clone();
         let mut singleplayer_button = gfx::Button::new(move || copied_menu.set(Some(1)));
         singleplayer_button.scale = 3.0;
@@ -49,7 +48,9 @@ impl MainMenu {
         exit_button.orientation = gfx::CENTER;
 
         let mut debug_title = gfx::Sprite::new();
-        debug_title.set_texture(gfx::Texture::load_from_surface(&graphics.font.create_text_surface("DEBUG MODE", None)));
+        if debug {
+            debug_title.set_texture(gfx::Texture::load_from_surface(&graphics.font.create_text_surface("DEBUG MODE", None)));
+        }
         debug_title.color = gfx::DARK_GREY;
         debug_title.orientation = gfx::TOP;
         debug_title.scale = 2.0;
@@ -59,6 +60,7 @@ impl MainMenu {
         title.set_texture(gfx::Texture::load_from_surface(&graphics.font.create_text_surface("Terralistic", None)));
         title.scale = 4.0;
         title.orientation = gfx::TOP;
+        // Only offset the title below the debug banner when running in debug mode.
         title.pos.1 = debug_title.pos.1 + debug_title.get_size().1 + gfx::SPACING / 2.0;
 
         let mut version = gfx::Sprite::new();
@@ -101,7 +103,6 @@ impl UiElement for MainMenu {
     fn get_sub_elements_mut(&mut self) -> Vec<&mut dyn BaseUiElement> {
         vec![
             &mut self.title,
-            #[cfg(debug_assertions)]
             &mut self.debug_title,
             &mut self.version,
             &mut self.singleplayer_button,
@@ -115,7 +116,6 @@ impl UiElement for MainMenu {
     fn get_sub_elements(&self) -> Vec<&dyn BaseUiElement> {
         vec![
             &self.title,
-            #[cfg(debug_assertions)]
             &self.debug_title,
             &self.version,
             &self.singleplayer_button,
