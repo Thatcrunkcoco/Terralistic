@@ -17,7 +17,7 @@ impl ChatLine {
     pub fn new(graphics: &gfx::GraphicsContext, text: &str) -> Self {
         let (texture, scale) = if let Some(terminal_font) = graphics.terminal_font.as_ref() {
             let surface = terminal_font.render_text(text);
-            (gfx::Texture::load_from_surface(&surface), 1.0)
+            (gfx::Texture::load_from_surface(&surface), terminal_font.display_ratio())
         } else {
             let font = graphics.font_mono.as_ref().map_or(&graphics.font, |mono_font| mono_font);
             (gfx::Texture::load_from_surface(&font.create_text_surface(text, None)), 2.0)

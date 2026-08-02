@@ -283,7 +283,7 @@ fn client_main() {
         "Terralistic",
         include_bytes!("Build/Resources/font.opa"),
         Some(include_bytes!("Build/Resources/font_mono.opa")),
-        Some((include_bytes!("Build/Resources/terminal_font.ttf"), 64.0)),
+        Some((include_bytes!("Build/Resources/terminal_font.ttf"), 32.0, 4.0)),
     );
 
     let mut graphics;

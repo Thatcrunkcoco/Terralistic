@@ -59,7 +59,7 @@ pub fn init(
     window_title: &str,
     default_font_data: &[u8],
     default_mono_font_data: Option<&[u8]>,
-    terminal_font_data: Option<(&'static [u8], f32)>,
+    terminal_font_data: Option<(&'static [u8], f32, f32)>,
 ) -> Result<GraphicsContext> {
     GraphicsContext::new(window_width, window_height, window_title, default_font_data, default_mono_font_data, terminal_font_data)
 }

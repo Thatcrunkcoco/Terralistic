@@ -9,21 +9,36 @@ use ab_glyph::{point, Font, FontRef, Glyph, PxScale, ScaleFont};
 pub struct TtfFont {
     font: FontRef<'static>,
     px_scale: PxScale,
+    // Factor to convert the rasterized (px_scale) size to the intended
+    // on-screen size. 1.0 renders at native size; <1.0 downsamples the hi-res
+    // glyphs for crisper small text.
+    display_ratio: f32,
 }
 
 impl TtfFont {
-    /// Loads a font from raw TTF/OTF bytes at the given pixel height.
-    pub fn new(font_data: &'static [u8], px_size: f32) -> Result<Self> {
+    /// Loads a font from raw TTF/OTF bytes.
+    ///
+    /// `display_size` is the intended on-screen pixel height. `supersample`
+    /// (`>= 1`) rasterizes at `display_size * supersample` resolution so the
+    /// scaled-down result stays sharp.
+    pub fn new(font_data: &'static [u8], display_size: f32, supersample: f32) -> Result<Self> {
         let font = FontRef::try_from_slice(font_data)?;
         Ok(Self {
+            px_scale: PxScale::from(display_size * supersample),
             font,
-            px_scale: PxScale::from(px_size),
+            display_ratio: 1.0 / supersample,
         })
     }
 
-    /// The pixel height of one line of text.
+    /// The scale factor to apply when rendering so the text appears at
+    /// `display_size` on screen (independent of the UI zoom).
+    pub const fn display_ratio(&self) -> f32 {
+        self.display_ratio
+    }
+
+    /// The on-screen pixel height of one line of text.
     pub fn line_height(&self) -> f32 {
-        self.font.as_scaled(self.px_scale).height()
+        self.font.as_scaled(self.px_scale).height() * self.display_ratio
     }
 
     /// Lays out the glyphs of `text`, handling newlines.
@@ -123,9 +138,13 @@ mod tests {
 
     const FONT: &[u8] = include_bytes!("../../Build/Resources/terminal_font.ttf");
 
+    fn make_font() -> TtfFont {
+        TtfFont::new(FONT, 28.0, 2.0).expect("font should load")
+    }
+
     #[test]
     fn rasterizes_text_with_visibility() {
-        let font = TtfFont::new(FONT, 28.0).expect("font should load");
+        let font = make_font();
         let surface = font.render_text("hello");
         let size = surface.get_size();
         assert!(size.0 > 0 && size.1 > 0, "surface should be non-empty");
@@ -142,7 +161,7 @@ mod tests {
 
     #[test]
     fn mono_is_wider_than_short_word() {
-        let font = TtfFont::new(FONT, 28.0).expect("font should load");
+        let font = make_font();
         let width_hello = font.measure("hello").0;
         let width_w = font.measure("w").0;
         assert!(width_hello > width_w, "longer text should be measured wider");
@@ -150,7 +169,7 @@ mod tests {
 
     #[test]
     fn newline_increases_height() {
-        let font = TtfFont::new(FONT, 28.0).expect("font should load");
+        let font = make_font();
         let single = font.measure("hi").1;
         let double = font.measure("hi\nhi").1;
         assert!(double > single, "newline should increase measured height");
@@ -158,7 +177,7 @@ mod tests {
 
     #[test]
     fn glyphs_are_not_stacked_at_origin() {
-        let font = TtfFont::new(FONT, 28.0).expect("font should load");
+        let font = make_font();
         let surface = font.render_text("hi");
         let width = surface.get_size().0;
         let height = surface.get_size().1;
@@ -174,5 +193,16 @@ mod tests {
             }
         }
         assert!(has_right_side, "second glyph should be drawn towards the right, not stacked at origin");
+    }
+
+    #[test]
+    fn display_ratio_scales_raster_up() {
+        // comparing single-supersample vs 2x: the 2x rasterizes at 2x resolution
+        let normal = TtfFont::new(FONT, 28.0, 1.0).unwrap().render_text("A");
+        let supersampled = TtfFont::new(FONT, 28.0, 2.0).unwrap().render_text("A");
+        let normal_h = normal.get_size().1;
+        let super_h = supersampled.get_size().1;
+        assert!(super_h > normal_h, "2x supersample should rasterize glyphs larger than 1x");
+        assert!((TtfFont::new(FONT, 28.0, 2.0).unwrap().display_ratio() - 0.5).abs() < 1e-4, "2x supersample -> display ratio of 0.5");
     }
 }

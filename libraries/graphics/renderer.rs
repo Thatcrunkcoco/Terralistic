@@ -56,7 +56,7 @@ impl GraphicsContext {
         window_title: &str,
         font: &[u8],
         font_mono: Option<&[u8]>,
-        terminal_font_data: Option<(&'static [u8], f32)>,
+        terminal_font_data: Option<(&'static [u8], f32, f32)>,
     ) -> Result<Self> {
         let sdl = sdl2::init();
         let sdl = sdl.map_err(|e| anyhow!(e))?;
@@ -94,7 +94,7 @@ impl GraphicsContext {
 
         let font = Font::new(font, false)?;
         let font_mono = if let Some(data) = font_mono { Some(Font::new(data, true)?) } else { None };
-        let terminal_font = if let Some((data, px_size)) = terminal_font_data { Some(gfx::TtfFont::new(data, px_size)?) } else { None };
+        let terminal_font = if let Some((data, display_size, supersample)) = terminal_font_data { Some(gfx::TtfFont::new(data, display_size, supersample)?) } else { None };
 
         let mut result = Self {
             _gl_context: gl_context,

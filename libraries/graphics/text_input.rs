@@ -38,6 +38,9 @@ pub struct TextInput {
     // Set each frame for terminal mode: 1/real_scale so the box stays a
     // constant on-screen size regardless of the UI zoom.
     terminal_zoom_compensation: f32,
+    // For terminal mode: the on-screen line height of the displayed text, used
+    // to size the box proportionally to the smaller/sharp text.
+    terminal_display_line_height: f32,
 }
 
 impl TextInput {
@@ -72,14 +75,20 @@ impl TextInput {
             text_processing: None,
             use_terminal_font: false,
             terminal_zoom_compensation: 1.0,
+            terminal_display_line_height: 0.0,
         }
     }
 
     #[must_use]
     pub fn get_size(&self) -> gfx::FloatSize {
+        let text_height = if self.use_terminal_font {
+            self.terminal_display_line_height
+        } else {
+            self.text_texture.get_texture_size().1
+        };
         gfx::FloatSize(
             (self.width) * self.scale * self.terminal_zoom_compensation,
-            (self.text_texture.get_texture_size().1 + self.padding * 2.0) * self.scale * self.terminal_zoom_compensation,
+            (text_height + self.padding * 2.0) * self.scale * self.terminal_zoom_compensation,
         )
     }
 
@@ -170,12 +179,17 @@ impl TextInput {
         gfx::FloatSize(size.0 as f32, size.1 as f32)
     }
 
-    /// The scale used when drawing text. Terminal fonts are rasterized at
-    /// their target size and rendered with `1/real_scale` so they stay a
-    /// constant on-screen size regardless of the UI zoom. The pixel font uses
-    /// the configured `scale` multiplier.
+    /// The scale used when drawing text. Terminal fonts are rasterized at a
+    /// higher resolution and rendered with `display_ratio / real_scale` so they
+    /// appear at the intended on-screen size regardless of the UI zoom. The
+    /// pixel font uses the configured `scale` multiplier.
     fn text_scale(&self, graphics: &gfx::GraphicsContext) -> f32 {
-        if self.use_terminal_font { 1.0 / graphics.real_scale() } else { self.scale }
+        if self.use_terminal_font {
+            let ratio = graphics.terminal_font.as_ref().map_or(1.0, |font| font.display_ratio());
+            ratio / graphics.real_scale()
+        } else {
+            self.scale
+        }
     }
 }
 
@@ -192,6 +206,11 @@ impl UiElement for TextInput {
     #[allow(clippy::too_many_lines)] // TODO: split this function up
     fn render_inner(&mut self, graphics: &mut gfx::GraphicsContext, parent_container: &gfx::Container) {
         self.terminal_zoom_compensation = if self.use_terminal_font { 1.0 / graphics.real_scale() } else { 1.0 };
+        self.terminal_display_line_height = if self.use_terminal_font {
+            graphics.terminal_font.as_ref().map_or(0.0, |font| font.line_height())
+        } else {
+            0.0
+        };
         let container = self.get_container(graphics, parent_container);
         let rect = container.get_absolute_rect();
 
