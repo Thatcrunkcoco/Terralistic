@@ -467,6 +467,33 @@ impl WorldGenerator {
             place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
+        // --- Gas demonstration room: a sealed, solid box floating in the air. ---
+        // It is intentionally solid (stone_block) so gases are contained. The
+        // matching cell coordinates live in `ServerGases::seed_test_gases`, which
+        // fills the interior with the declared gas types after the layer is built.
+        // (386..466, 96..166) is the interior; the box is 4 blocks of wall around it.
+        for x in 380..472 {
+            for y in 88..174 {
+                // clear anything that was already here (trees overlap the span)
+                block_terrain[x as usize][y as usize] = air;
+                wall_terrain[x as usize][y as usize] = walls.clear;
+            }
+        }
+        for x in 380..472 {
+            for y in [88, 90, 172, 174] {
+                tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+            }
+            // inner-frame for the side walls
+            tset(&mut block_terrain, x, 89, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
+        }
+        for y in 89..174 {
+            tset(&mut block_terrain, 380, y, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, 381, y, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, 470, y, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, 471, y, width, height_u as i32, stone_block);
+        }
+
         blocks.create_from_block_ids(&block_terrain)?;
         walls.create_from_wall_ids(&wall_terrain)?;
 

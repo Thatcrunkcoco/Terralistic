@@ -36,6 +36,7 @@ use super::networking::ClientNetworking;
 use super::walls::ClientWalls;
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_game(
     graphics: &mut gfx::GraphicsContext,
     server_port: u16,
@@ -43,6 +44,7 @@ pub fn run_game(
     player_name: &str,
     settings: &Rc<RefCell<Settings>>,
     global_settings: &Rc<RefCell<GlobalSettings>>,
+    debug: bool,
 ) -> Result<()> {
     // load base game mod
     let mut pre_events = EventManager::new();
@@ -109,7 +111,7 @@ pub fn run_game(
     let mut block_selector = BlockSelector::new();
     let mut pause_menu = PauseMenu::new(graphics, settings.clone(), global_settings.clone());
     let mut debug_menu = DebugMenu::new();
-    let mut gas_debug_overlay = GasDebugOverlay::new();
+    let mut gas_debug_overlay = GasDebugOverlay::new(debug);
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -129,6 +131,7 @@ pub fn run_game(
 
     pause_menu.init(graphics);
     debug_menu.init();
+    gas_debug_overlay.init(graphics);
     chat.init(graphics);
     respawn_screen.init(graphics);
 
@@ -214,7 +217,7 @@ pub fn run_game(
                 break 'main_loop;
             }
             debug_menu.on_event(&event);
-            gas_debug_overlay.on_event(&event, &mut gases, &mut networking)?;
+            gas_debug_overlay.on_event(&event, graphics, &mut gases, &mut networking)?;
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
 

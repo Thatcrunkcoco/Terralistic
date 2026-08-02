@@ -241,6 +241,12 @@ impl Server {
         // Size the gas layer to the generated/loaded world and seed it with air.
         self.gases.initialize_world(&self.blocks.get_blocks());
 
+        // Seed the sealed gas demo room (only present in the flat test world) so
+        // the debug overlay has layered gases to visualize.
+        if self.world_name == "test" && self.world_seed == 123 {
+            self.gases.seed_test_gases();
+        }
+
         self.set_state(ServerState::Running);
 
         print_to_console(&format!("server started in {}ms", timer.elapsed().as_millis()), 0);

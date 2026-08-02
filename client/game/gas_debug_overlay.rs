@@ -4,29 +4,62 @@ use crate::client::game::networking::ClientNetworking;
 use crate::libraries::events::Event;
 use crate::libraries::graphics as gfx;
 use crate::shared::blocks::RENDER_BLOCK_WIDTH;
+use gfx::BaseUiElement;
 
 /// A debug-only overlay that paints every visible gas cell as a semi-transparent
 /// rectangle colored by gas type and brightened by pressure. It is meant for
 /// vacuum test worlds so the flow simulation (`pressure_rate` /
 /// `buoyancy_rate`) can be tuned by eye.
 ///
-/// Toggled with a key; toggling it on also requests live gas layer updates from
-/// the server, which is the only time the server pushes gas snapshots.
+/// It can be toggled with the G key, or (in debug mode only) by clicking the
+/// "Gases" icon shown in the corner. Toggling it on requests live gas layer
+/// updates from the server, which is the only time the server pushes snapshots.
 pub struct GasDebugOverlay {
     open: bool,
+    debug: bool,
+    toggle_button: gfx::Button,
+    label_state: bool,
 }
 
 impl GasDebugOverlay {
     #[must_use]
-    pub fn new() -> Self {
-        Self { open: false }
+    pub fn new(debug: bool) -> Self {
+        let mut toggle_button = gfx::Button::new(|| {});
+        toggle_button.scale = 2.0;
+        toggle_button.pos.0 = -gfx::SPACING;
+        toggle_button.pos.1 = -gfx::SPACING;
+        toggle_button.orientation = gfx::TOP_RIGHT;
+        Self {
+            open: false,
+            debug,
+            toggle_button,
+            label_state: false,
+        }
     }
 
-    /// Handle a key event to toggle the overlay and, in turn, request live
-    /// updates from the server.
-    pub fn on_event(&mut self, event: &Event, gases: &mut ClientGases, networking: &mut ClientNetworking) -> Result<(), anyhow::Error> {
+    /// Initializes the toggle icon's label. Needs the graphics context for the font.
+    pub fn init(&mut self, graphics: &gfx::GraphicsContext) {
+        self.toggle_button.texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface("Gases: OFF", None));
+    }
+
+    /// Handle input for the overlay: the G hotkey and the on-screen toggle icon.
+    pub fn on_event(
+        &mut self,
+        event: &Event,
+        graphics: &mut gfx::GraphicsContext,
+        gases: &mut ClientGases,
+        networking: &mut ClientNetworking,
+    ) -> Result<(), anyhow::Error> {
         if matches!(event.downcast::<gfx::Event>(), Some(gfx::Event::KeyPress(gfx::Key::G, false))) {
             self.toggle(gases, networking)?;
+        }
+        if self.debug {
+            // clicking the icon toggles the overlay
+            if let Some(gfx_event) = event.downcast::<gfx::Event>() {
+                if self.toggle_button.on_event(graphics, gfx_event, &gfx::Container::default(graphics)) {
+                    self.toggle(gases, networking)?;
+                }
+            }
         }
         Ok(())
     }
@@ -38,12 +71,26 @@ impl GasDebugOverlay {
         Ok(())
     }
 
-    /// Rebuilds and renders the overlay for the visible region.
+    /// Renders the overlay (gas cells) plus, in debug mode, the on-screen icon.
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, gases: &ClientGases, camera: &Camera) -> Result<(), anyhow::Error> {
-        if !self.open {
-            return Ok(());
+        if self.open {
+            self.render_gas_cells(graphics, gases, camera)?;
         }
 
+        if self.debug {
+            // reflect current state on the icon label (only rebuild when it changes)
+            if self.open != self.label_state {
+                let label = if self.open { "Gases: ON" } else { "Gases: OFF" };
+                self.toggle_button.texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface(label, None));
+                self.label_state = self.open;
+            }
+            self.toggle_button.render(graphics, &gfx::Container::default(graphics));
+        }
+
+        Ok(())
+    }
+
+    fn render_gas_cells(&self, graphics: &mut gfx::GraphicsContext, gases: &ClientGases, camera: &Camera) -> Result<(), anyhow::Error> {
         let layer = gases.layer();
         let (width, height) = layer.get_size();
         if width == 0 || height == 0 {

@@ -56,10 +56,12 @@ pub struct PrivateWorld {
     state: PrivateWorldState,
     settings: Rc<RefCell<Settings>>,
     global_settings: Rc<RefCell<GlobalSettings>>,
+    debug: bool,
 }
 
 impl PrivateWorld {
-    pub fn new(world_path: &Path, seed: u64, world_name: String, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>) -> Result<Self> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(world_path: &Path, seed: u64, world_name: String, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>, debug: bool) -> Result<Self> {
         let (server_thread, server_running, loading_text) = start_private_world_server(world_path, seed, world_name)?;
         Ok(Self {
             server_thread: Some(server_thread),
@@ -68,6 +70,7 @@ impl PrivateWorld {
             state: PrivateWorldState::StartingServer,
             settings,
             global_settings,
+            debug,
         })
     }
 }
@@ -104,7 +107,7 @@ impl Menu for PrivateWorld {
             PrivateWorldState::Loading => {
                 self.state = PrivateWorldState::Playing;
                 if self.server_running.load(Ordering::Relaxed) {
-                    let res = run_game(graphics, SINGLEPLAYER_PORT, String::from("127.0.0.1"), "_", &self.settings, &self.global_settings);
+                    let res = run_game(graphics, SINGLEPLAYER_PORT, String::from("127.0.0.1"), "_", &self.settings, &self.global_settings, self.debug);
 
                     if let Err(e) = res {
                         println!("{e}");

@@ -125,7 +125,7 @@ pub fn run_title_screen(graphics: &mut gfx::GraphicsContext, settings: &Rc<RefCe
         }
 
         if let Some(i) = open_secondary_menu.get() {
-            if menus.secondary_menu.open_secondary_menu(graphics, i, settings.clone(), global_settings.clone(), &secondary_back_rect) {
+            if menus.secondary_menu.open_secondary_menu(graphics, i, settings.clone(), global_settings.clone(), &secondary_back_rect, debug) {
                 menus.state = TitleScreenState::BothMenus;
             }
         }

@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::libraries::events::Event;
 use crate::server::server_core::networking::{NewConnectionEvent, PacketFromClientEvent, SendTarget, ServerNetworking};
 use crate::shared::blocks::Blocks;
-use crate::shared::gases::{init_gases_mod_interface, ClientRequestGasDebugPacket, GasFlow, GasId, GasLayer, GasLayerUpdatePacket, GasLayerWelcomePacket, Gases, GasType};
+use crate::shared::gases::{init_gases_mod_interface, ClientRequestGasDebugPacket, GasCell, GasFlow, GasId, GasLayer, GasLayerUpdatePacket, GasLayerWelcomePacket, Gases, GasType};
 use crate::shared::mod_manager::ModManager;
 use crate::shared::packet::Packet;
 
@@ -81,6 +81,61 @@ impl ServerGases {
             GasId::from_raw(0)
         } else {
             id
+        }
+    }
+
+    /// Seeds the sealed gas demonstration room in the "test" world with the
+    /// declared gas types so the debug overlay has layered content to visualize.
+    /// The room interior is x in [382..470], y in [91..172] (matching the solid
+    /// box built in `WorldGenerator::generate_test`). We stack gases vertically
+    /// and deliberately invert them so the flow re-layers them by density.
+    pub fn seed_test_gases(&mut self) {
+        let (width, height) = self.layer.get_size();
+        if width == 0 || height == 0 {
+            return;
+        }
+        let id_of = |name: &str| {
+            let gases = self.gases.lock().unwrap_or_else(PoisonError::into_inner);
+            gases.get_gas_id_by_name(name)
+        };
+        let air = id_of("air").unwrap_or(GasId::NONE);
+        let hydrogen = id_of("hydrogen").unwrap_or(GasId::NONE);
+        let co2 = id_of("co2").unwrap_or(GasId::NONE);
+        let oxygen = id_of("oxygen").unwrap_or(GasId::NONE);
+
+        const X0: i32 = 382;
+        const X1: i32 = 470;
+        const Y0: i32 = 91;
+        const Y1: i32 = 172;
+
+        for y in Y0..Y1 {
+            // Center band is breathable air.
+            let gas = if y < 100 {
+                // top band: carbon dioxide (heavy) — will settle to the bottom
+                co2
+            } else if y < 166 {
+                // middle band: air
+                air
+            } else {
+                // bottom band: hydrogen (light) — will float to the top
+                hydrogen
+            };
+            if gas.is_none() {
+                continue;
+            }
+            for x in X0..X1 {
+                let _ = self.layer.set_cell(x, y, GasCell::new(gas, 100.0));
+                self.flow.activate(x as u32, y as u32, width, height);
+            }
+        }
+        // a small pocket of pure oxygen near the center for contrast
+        if !oxygen.is_none() {
+            for x in 400..440 {
+                for y in 120..140 {
+                    let _ = self.layer.set_cell(x, y, GasCell::new(oxygen, 150.0));
+                    self.flow.activate(x as u32, y as u32, width, height);
+                }
+            }
         }
     }
 
