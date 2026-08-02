@@ -98,9 +98,16 @@ impl ClientChat {
         let window_container = gfx::Container::default(graphics);
         let window_size = graphics.get_window_size();
         let inv_scale = 1.0 / graphics.real_scale();
+
+        // constant on-screen bottom margin (identical for box and history so
+        // they never drift apart / overlap at any UI zoom)
+        let bottom_margin = gfx::SPACING * inv_scale;
+
         if self.visible {
             // full window width with a constant on-screen margin
             self.text_input.width = window_size.0 * graphics.real_scale() - gfx::SPACING * 2.0;
+            self.text_input.pos.1 = -bottom_margin;
+            self.back_rect.pos.1 = -bottom_margin;
 
             // box size is already compensated to a constant on-screen size
             let box_size = self.text_input.get_size();
@@ -115,7 +122,9 @@ impl ClientChat {
         }
 
         let input_height = self.text_input.get_size().1;
-        let mut curr_y = window_size.1 - gfx::SPACING * inv_scale - input_height;
+        // small consistent on-screen gap between the history and the box
+        let history_gap = gfx::SPACING * 0.5 * inv_scale;
+        let mut curr_y = window_size.1 - bottom_margin - input_height - history_gap;
         for line in self.chat_lines.iter_mut().rev() {
             curr_y -= line.get_size(graphics).1;
             line.render(graphics, gfx::FloatPos(gfx::SPACING, curr_y), self.text_input.selected);
