@@ -86,9 +86,11 @@ impl TextInput {
         } else {
             self.text_texture.get_texture_size().1
         };
+        // give terminal text a bit more vertical room
+        let extra = if self.use_terminal_font { self.padding * 2.0 } else { 0.0 };
         gfx::FloatSize(
             (self.width) * self.scale * self.terminal_zoom_compensation,
-            (text_height + self.padding * 2.0) * self.scale * self.terminal_zoom_compensation,
+            (text_height + self.padding * 2.0 + extra) * self.scale * self.terminal_zoom_compensation,
         )
     }
 
@@ -285,12 +287,18 @@ impl UiElement for TextInput {
             } else {
                 self.text_texture.get_texture_size().1 * self.text_scale(graphics)
             };
+            // nudge terminal text down a couple pixels for nicer optical alignment
+            let y_adjust = if self.use_terminal_font {
+                (self.text_scale(graphics) / self.terminal_zoom_compensation) * 0.5 / graphics.real_scale()
+            } else {
+                0.0
+            };
             self.text_texture.render(
                 graphics,
                 self.text_scale(graphics),
                 gfx::FloatPos(
                     rect.pos.0 + self.padding * self.text_scale(graphics),
-                    rect.pos.1 + rect.size.1 / 2.0 - text_render_height / 2.0,
+                    rect.pos.1 + rect.size.1 / 2.0 - text_render_height / 2.0 + y_adjust,
                 ),
                 Some(src_rect),
                 false,

@@ -107,25 +107,41 @@ impl TtfFont {
 
     /// Returns the axis-aligned pixel bounding box of the rendered text:
     /// `(has_content, min_x, min_y, max_x, max_y)`.
+    ///
+    /// Glyphs without ink (e.g. spaces) still extend the width by their
+    /// horizontal advance, so the measured bounds match the cursor/placement.
     fn text_bounds(&self, text: &str) -> (bool, f32, f32, f32, f32) {
         let scale_font = self.font.as_scaled(self.px_scale);
         let mut max_x = 0.0f32;
         let mut max_y = 0.0f32;
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
+        let mut min_x = 0.0f32;
+        let mut min_y = 0.0f32;
+        let mut min_set = false;
 
         for glyph in self.layout(text) {
+            let position = glyph.position;
+            let id = glyph.id;
             if let Some(outlined) = scale_font.outline_glyph(glyph) {
                 let bounds = outlined.px_bounds();
+                if !min_set {
+                    min_x = bounds.min.x;
+                    min_y = bounds.min.y;
+                    min_set = true;
+                }
                 min_x = min_x.min(bounds.min.x);
                 min_y = min_y.min(bounds.min.y);
                 max_x = max_x.max(bounds.max.x);
                 max_y = max_y.max(bounds.max.y);
+            } else {
+                // advance-only glyph (e.g. space): extend the right edge
+                let right = position.x + scale_font.h_advance(id);
+                max_x = max_x.max(right);
             }
         }
 
-        if min_x == f32::MAX {
-            return (false, 0.0, 0.0, 1.0, 1.0);
+        if !min_set {
+            // text with no ink at all (empty or whitespace-only)
+            return (false, 0.0, 0.0, max_x.max(1.0), 1.0);
         }
 
         (true, min_x, min_y, max_x, max_y)
