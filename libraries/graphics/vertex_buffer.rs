@@ -23,14 +23,11 @@ pub struct VertexBuffer {
     vertex_array: u32,
 }
 
+/// Intentionally a no-op: freeing GL buffers here would run after the SDL GL
+/// context is destroyed at exit, causing a use-after-free / SIGSEGV. The OS
+/// reclaims GL resources when the process exits.
 impl Drop for VertexBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            gl::DeleteBuffers(1, &self.vertex_buffer);
-            gl::DeleteBuffers(1, &self.index_buffer);
-            gl::DeleteVertexArrays(1, &self.vertex_array);
-        }
-    }
+    fn drop(&mut self) {}
 }
 
 impl VertexBuffer {

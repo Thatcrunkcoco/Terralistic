@@ -54,17 +54,6 @@ impl Texture {
         result
     }
 
-    /// Deletes the current texture if it exists.
-    fn free_texture(&mut self) {
-        if self.texture_handle != u32::MAX {
-            unsafe {
-                gl::DeleteTextures(1, &self.texture_handle);
-            }
-            self.texture_handle = u32::MAX;
-            self.size = gfx::FloatSize(0.0, 0.0);
-        }
-    }
-
     #[must_use]
     pub const fn get_texture_size(&self) -> gfx::FloatSize {
         self.size
@@ -119,9 +108,9 @@ impl Texture {
     }
 }
 
-/// Free the surface when it goes out of scope.
+/// Intentionally a no-op: freeing GL textures here would run after the SDL GL
+/// context is destroyed at exit, causing a use-after-free / SIGSEGV. The OS
+/// reclaims GL resources when the process exits.
 impl Drop for Texture {
-    fn drop(&mut self) {
-        self.free_texture();
-    }
+    fn drop(&mut self) {}
 }

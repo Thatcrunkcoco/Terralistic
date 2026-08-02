@@ -178,13 +178,23 @@ impl BlurContext {
             }
         }
     }
-}
 
-/// Drop function for blur context.
-impl Drop for BlurContext {
-    fn drop(&mut self) {
+    /// Frees the GL resources this blur context owns. Called by the renderer's
+    /// clean-up *before* the SDL/GL context is destroyed, so the GL calls are
+    /// safe. Idempotent; safe to call more than once.
+    pub(super) fn cleanup(&mut self) {
         unsafe {
             gl::DeleteProgram(self.blur_shader);
+            gl::DeleteBuffers(1, &self.rect_vertex_buffer);
         }
+        self.blur_shader = 0;
+        self.rect_vertex_buffer = 0;
     }
+}
+
+/// Intentionally a no-op: GL cleanup is performed by `cleanup()` while the GL
+/// context is still current. Running glDelete* here would execute after the
+/// SDL GL context is destroyed, causing a use-after-free / SIGSEGV at exit.
+impl Drop for BlurContext {
+    fn drop(&mut self) {}
 }

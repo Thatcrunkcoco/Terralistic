@@ -376,6 +376,10 @@ impl GraphicsContext {
 impl Drop for GraphicsContext {
     /// Closes, destroys the window and cleans up the resources.
     fn drop(&mut self) {
+        // Free GL resources while the GL context is still current. Running
+        // glDelete* from field Drop impls (e.g. BlurContext) would happen after
+        // the SDL GL context is destroyed and crash with SIGSEGV at exit.
+        self.blur_context.cleanup();
         unsafe {
             gl::DeleteFramebuffers(1, &self.window_framebuffer);
             gl::DeleteTextures(1, &self.window_texture);
