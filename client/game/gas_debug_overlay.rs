@@ -19,6 +19,13 @@ pub struct GasDebugOverlay {
     debug: bool,
     toggle_button: gfx::Button,
     label_state: bool,
+    /// Tracks whether the mouse button went down over the toggle icon. The icon
+    /// only toggles on a genuine press-then-release click, so an unrelated mouse
+    /// release (e.g. the player letting go of a block-mining hold) never flips it.
+    /// A single click is exactly one press + one release, so this needs no
+    /// time-based debounce -- rapid clicking must toggle on every click, just
+    /// like the G hotkey does.
+    mouse_down_on_button: bool,
 }
 
 impl GasDebugOverlay {
@@ -34,6 +41,7 @@ impl GasDebugOverlay {
             debug,
             toggle_button,
             label_state: false,
+            mouse_down_on_button: false,
         }
     }
 
@@ -42,31 +50,87 @@ impl GasDebugOverlay {
         self.toggle_button.texture = gfx::Texture::load_from_surface(&graphics.font.create_text_surface("Gases: OFF", None));
     }
 
-    /// Handle input for the overlay: the G hotkey and the on-screen toggle icon.
+    /// Handles input for the overlay: the G hotkey and the on-screen toggle icon.
+    ///
+    /// Returns `Ok(true)` when this event was *consumed* by the UI: i.e. a mouse
+    /// up/down landed on the toggle icon. The caller should then skip passing the
+    /// event to world handlers (e.g. `block_selector`) -- otherwise clicking the
+    /// icon in the screen corner would also mine/place the block under the cursor
+    /// (or, when the cursor is off-world, crash the server on an out-of-bounds).
     pub fn on_event(
         &mut self,
         event: &Event,
         graphics: &mut gfx::GraphicsContext,
         gases: &mut ClientGases,
         networking: &mut ClientNetworking,
-    ) -> Result<(), anyhow::Error> {
-        if matches!(event.downcast::<gfx::Event>(), Some(gfx::Event::KeyPress(gfx::Key::G, false))) {
-            self.toggle(gases, networking)?;
-        }
-        if self.debug {
-            // clicking the icon toggles the overlay
-            if let Some(gfx_event) = event.downcast::<gfx::Event>() {
-                if self.toggle_button.on_event(graphics, gfx_event, &gfx::Container::default(graphics)) {
-                    self.toggle(gases, networking)?;
+    ) -> Result<bool, anyhow::Error> {
+        if let Some(gfx_event) = event.downcast::<gfx::Event>() {
+            // trace every mouse/keyboard input so we can see exactly what reaches
+            // the overlay when toggling by button vs. by G hotkey.
+            if let gfx::Event::KeyPress(gfx::Key::G, false) = gfx_event {
+                tracing::debug!("gas_overlay: G hotkey press -> toggle");
+                self.toggle(gases, networking)?;
+                return Ok(false);
+            }
+            if self.debug {
+                // clicking the icon toggles the overlay (and consumes the event)
+                if self.button_click(graphics, gfx_event, gases, networking)? {
+                    return Ok(true);
                 }
             }
         }
-        Ok(())
+        Ok(false)
+    }
+
+    /// Handles press/release of `MouseLeft`, returning `Ok(true)` when the event
+    /// landed on the toggle icon (so the caller knows the UI consumed it and
+    /// should not forward it to world handlers).
+    ///
+    /// This tracks a genuine press-then-release click instead of using the generic
+    /// [`gfx::Button`] hook. That hook fires on *any* mouse release while hovered,
+    /// even if the button was never pressed down there -- which makes the on-screen
+    /// icon unreliable compared to the G hotkey: a player who holds `MouseLeft` to
+    /// mine and lets go over the icon would flip it by accident, and rapid clicking
+    /// appears to "break" for the same reason. Tracking the press explicitly makes
+    /// the icon only toggle on a real click, once per click, exactly matching the G
+    /// key (which needs no debounce: one press + one release is one click).
+    fn button_click(
+        &mut self,
+        graphics: &mut gfx::GraphicsContext,
+        gfx_event: &gfx::Event,
+        gases: &mut ClientGases,
+        networking: &mut ClientNetworking,
+    ) -> Result<bool, anyhow::Error> {
+        match gfx_event {
+            gfx::Event::KeyPress(gfx::Key::MouseLeft, _) => {
+                let hovered = self.toggle_button.is_hovered(graphics, &gfx::Container::default(graphics));
+                tracing::debug!("gas_overlay: ButtonLeft press hovered={hovered}");
+                if hovered {
+                    self.mouse_down_on_button = true;
+                }
+                Ok(hovered)
+            }
+            gfx::Event::KeyRelease(gfx::Key::MouseLeft, _) => {
+                let was_down = self.mouse_down_on_button;
+                self.mouse_down_on_button = false;
+                let hovered = self.toggle_button.is_hovered(graphics, &gfx::Container::default(graphics));
+                tracing::debug!("gas_overlay: ButtonLeft release was_down={was_down} hovered={hovered}");
+                if was_down && hovered {
+                    self.toggle(gases, networking)?;
+                }
+                // Consume the release if a press began on the icon (even if the
+                // release ends just off it), so the icon drag never leaks a
+                // world interaction.
+                Ok(was_down)
+            }
+            _ => Ok(false),
+        }
     }
 
     /// Toggles the overlay on/off, starting/stopping live server updates.
     pub fn toggle(&mut self, gases: &mut ClientGases, networking: &mut ClientNetworking) -> Result<(), anyhow::Error> {
         self.open = !self.open;
+        tracing::debug!("gas_overlay: toggle -> open={} (requesting live updates)", self.open);
         gases.request_live_updates(self.open, networking)?;
         Ok(())
     }

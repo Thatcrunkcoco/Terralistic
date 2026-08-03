@@ -99,6 +99,98 @@ mod tests {
     use crate::shared::gases::GasLayer;
 
     #[test]
+    fn gas_layer_full_world_serialize_size() {
+        // Simulate the test world's full layer to measure the compressed payload.
+        let mut layer = GasLayer::new();
+        let air = GasId::from_raw(0);
+        let co2 = GasId::from_raw(1);
+        let hydrogen = GasId::from_raw(2);
+        layer.create((512, 256), air, 100.0);
+        // a small gas room like seed_test_gases fills
+        for y in 174..179 {
+            let gas = if y < 176 { co2 } else if y < 178 { air } else { hydrogen };
+            for x in 498..503 {
+                layer.set_cell(x, y, GasCell::new(gas, 100.0)).unwrap();
+            }
+        }
+        let bytes = layer.serialize().unwrap();
+        let raw = bincode::serialize(&layer).unwrap();
+        eprintln!("full-size gas layer: raw={} bytes, snap-compressed={} bytes", raw.len(), bytes.len());
+        assert!(bytes.len() < 65_000, "payload too big for framed tcp: {}", bytes.len());
+        // verify round-trip through the sparse patch
+        let mut decoded = GasLayer::new();
+        decoded.deserialize(&bytes).unwrap();
+        assert_eq!(decoded.get_size(), layer.get_size());
+        assert_eq!(decoded.get_cell(499, 175).unwrap().gas, co2);
+        assert_eq!(decoded.get_cell(499, 178).unwrap().gas, hydrogen);
+        assert_eq!(decoded.get_cell(500, 100).unwrap().gas, air);
+    }
+
+    #[test]
+    fn gas_layer_update_chunks_reconstruct_layer() {
+        // A layer where many cells differ from the base, like a full open world
+        // after gas flow has redistributed pressures. It must split into bounded
+        // chunks that reconstruct the original layer when re-applied.
+        let mut layer = GasLayer::new();
+        let air = GasId::from_raw(0);
+        let co2 = GasId::from_raw(1);
+        layer.create((64, 64), air, 100.0);
+        // vary pressure/gas across ~half the cells so the patch is large
+        for x in 0..64 {
+            for y in 0..64 {
+                if (x + y) % 2 == 0 {
+                    layer.set_cell(x, y, GasCell::new(if x % 3 == 0 { co2 } else { air }, 150.0)).unwrap();
+                }
+            }
+        }
+
+        let chunks = layer.update_chunks(400);
+        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+        assert!(chunks[0].start_of_frame);
+        assert!(!chunks[1].start_of_frame);
+
+        // No single chunk may approach the framed-TCP wire limit. Each entry is
+        // ~12 bytes on the wire, so a 400-cell cap keeps every chunk tiny.
+        for chunk in &chunks {
+            let bytes = bincode::serialize(chunk).unwrap();
+            assert!(bytes.len() < 65_000, "chunk too big for framed tcp: {}", bytes.len());
+            assert!(chunk.indexes.len() <= 400);
+        }
+
+        // Rebuild the layer from the chunks and compare against the original.
+        let mut decoded = GasLayer::new();
+        for chunk in &chunks {
+            decoded.apply_chunk(chunk);
+        }
+        assert_eq!(decoded.get_size(), layer.get_size());
+        for x in [0, 10, 40, 63] {
+            for y in [0, 15, 33, 63] {
+                assert_eq!(decoded.get_cell(x, y).unwrap().gas, layer.get_cell(x, y).unwrap().gas, "gas mismatch at {x},{y}");
+                assert!((decoded.get_cell(x, y).unwrap().pressure - layer.get_cell(x, y).unwrap().pressure).abs() < 0.001, "pressure mismatch at {x},{y}");
+            }
+        }
+    }
+
+    #[test]
+    fn gas_layer_update_chunks_single_chunk_when_uniform() {
+        // A uniform layer (only the base differs from nothing) still yields one
+        // well-formed frame chunk that does not reset an existing client to empty.
+        let mut layer = GasLayer::new();
+        let air = GasId::from_raw(0);
+        layer.create((10, 10), air, 100.0);
+        let chunks = layer.update_chunks(400);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].start_of_frame);
+        assert_eq!(chunks[0].indexes.len(), 0);
+
+        let mut decoded = GasLayer::new();
+        decoded.apply_chunk(&chunks[0]);
+        assert_eq!(decoded.get_size(), (10, 10));
+        assert_eq!(decoded.get_cell(5, 5).unwrap().gas, air);
+        assert_eq!(decoded.get_cell(5, 5).unwrap().pressure, 100.0);
+    }
+
+    #[test]
     fn gas_layer_starts_empty() {
         let layer = GasLayer::new();
         assert_eq!(layer.get_size(), (0, 0));

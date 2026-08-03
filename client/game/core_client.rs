@@ -201,6 +201,15 @@ pub fn run_game(
             if chat.on_event(&event, graphics, &mut networking)? {
                 continue;
             }
+            // The gas overlay's on-screen toggle icon consumes mouse press/release
+            // events that land on it, so they must not also reach the world
+            // handlers below (block_selector would mine the block under the cursor,
+            // and an off-world corner click would crash the server on an
+            // out-of-bounds coordinate). Run it before the world handlers and skip
+            // them entirely when it consumes the event.
+            if gas_debug_overlay.on_event(&event, graphics, &mut gases, &mut networking)? {
+                continue;
+            }
             inventory.on_event(&event, &mut networking, &items, &mut blocks.get_blocks(), &mut events)?;
             mods.on_event(&event)?;
             blocks.on_event(&event, &mut events, &mut networking)?;
@@ -217,7 +226,6 @@ pub fn run_game(
                 break 'main_loop;
             }
             debug_menu.on_event(&event);
-            gas_debug_overlay.on_event(&event, graphics, &mut gases, &mut networking)?;
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
 

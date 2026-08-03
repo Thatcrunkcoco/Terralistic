@@ -272,6 +272,7 @@ impl Server {
             last_time = std::time::Instant::now();
 
             if let Err(e) = self.update() {
+                tracing::error!("server update loop errored, stopping: {e:?}");
                 if result.is_ok() {
                     result = Err(e);
                 }

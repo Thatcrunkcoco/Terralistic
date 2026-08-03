@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use anyhow::Result;
 
 use crate::libraries::events::Event;
-use crate::server::server_core::networking::{NewConnectionEvent, PacketFromClientEvent, SendTarget, ServerNetworking};
+use crate::server::server_core::networking::{DisconnectEvent, NewConnectionEvent, PacketFromClientEvent, SendTarget, ServerNetworking};
 use crate::shared::blocks::Blocks;
 use crate::shared::gases::{init_gases_mod_interface, ClientRequestGasDebugPacket, GasCell, GasFlow, GasId, GasLayer, GasLayerUpdatePacket, GasLayerWelcomePacket, Gases, GasType};
 use crate::shared::mod_manager::ModManager;
@@ -14,6 +14,12 @@ use crate::shared::packet::Packet;
 /// the gas debug visualizer enabled. Kept low so the live-view feels responsive
 /// without spamming large compressed payloads every tick.
 const GAS_DEBUG_UPDATE_INTERVAL_TICKS: u32 = 10;
+
+/// Maximum number of differing cells carried in a single gas-layer update chunk.
+/// Each entry serializes to ~12 bytes (index + gas id + pressure), so with this
+/// cap a single chunk stays well under the ~65KB framed-TCP wire limit. The
+/// snapshot is split into multiple chunks when more cells differ.
+const GAS_DEBUG_CHUNK_MAX_CELLS: usize = 3000;
 
 /// Handles all gas related stuff on the server side: owns the gas registry that
 /// mods populate via Lua, the per-tile gas layer, and the flow simulation that
@@ -143,15 +149,37 @@ impl ServerGases {
     /// connections and toggles live updates in response to client requests.
     pub fn on_event(&mut self, event: &Event, networking: &mut ServerNetworking) -> Result<()> {
         if let Some(event) = event.downcast::<NewConnectionEvent>() {
-            let welcome = Packet::new(GasLayerWelcomePacket { data: self.layer.serialize()? })?;
-            networking.send_packet(&welcome, SendTarget::Connection(event.conn.clone()))?;
+            match self.layer.serialize() {
+                Ok(data) => {
+                    tracing::trace!("gas: sending welcome layer ({} bytes)", data.len());
+                    match Packet::new(GasLayerWelcomePacket { data }) {
+                        Ok(packet) => {
+                            if let Err(e) = networking.send_packet(&packet, SendTarget::Connection(event.conn.clone())) {
+                                tracing::warn!("gas: welcome send to {} failed (non-fatal): {e:?}", event.conn.address);
+                            }
+                        }
+                        Err(e) => tracing::warn!("gas: failed to build welcome packet (non-fatal): {e:?}"),
+                    }
+                }
+                Err(e) => tracing::warn!("gas: failed to serialize welcome layer (non-fatal): {e:?}"),
+            }
         } else if let Some(event) = event.downcast::<PacketFromClientEvent>() {
             if let Some(packet) = event.packet.try_deserialize::<ClientRequestGasDebugPacket>() {
                 if packet.enabled {
                     self.gas_debug_conns.insert(event.conn.clone());
+                    tracing::trace!("gas: client {} requested live updates", event.conn.address);
                 } else {
                     self.gas_debug_conns.remove(&event.conn);
+                    tracing::trace!("gas: client {} stopped live updates", event.conn.address);
                 }
+            }
+        } else if let Some(event) = event.downcast::<DisconnectEvent>() {
+            // A client that goes away while the overlay is on must not leave a
+            // stale entry behind. Otherwise the next session (which reuses the
+            // same loopback port) would keep receiving gas updates for a dead
+            // connection, wedging the live-update bookkeeping.
+            if self.gas_debug_conns.remove(&event.conn) {
+                tracing::trace!("gas: disconnected client {} removed from live updates", event.conn.address);
             }
         }
         Ok(())
@@ -212,10 +240,20 @@ impl ServerGases {
         if !self.gas_debug_conns.is_empty() {
             self.update_ticks = self.update_ticks.wrapping_add(1);
             if self.update_ticks % GAS_DEBUG_UPDATE_INTERVAL_TICKS == 0 {
-                let data = self.layer.serialize()?;
-                let packet = Packet::new(GasLayerUpdatePacket { data })?;
-                for conn in &self.gas_debug_conns {
-                    networking.send_packet(&packet, SendTarget::Connection(conn.clone()))?;
+                // Push the live snapshot in bounded chunks so no single packet
+                // (and therefore no framed-TCP frame) can exceed the wire limit,
+                // even when gas pressures vary across a large open world.
+                let chunks = self.layer.update_chunks(GAS_DEBUG_CHUNK_MAX_CELLS);
+                tracing::debug!(
+                    "gas: pushing live update: {} conns, {} chunks",
+                    self.gas_debug_conns.len(),
+                    chunks.len()
+                );
+                for chunk in chunks {
+                    let packet = Packet::new(GasLayerUpdatePacket { chunk })?;
+                    for conn in &self.gas_debug_conns {
+                        networking.send_packet(&packet, SendTarget::Connection(conn.clone()))?;
+                    }
                 }
             }
         }

@@ -97,6 +97,19 @@ impl ServerBlocks {
             networking.send_packet(&welcome_packet, SendTarget::Connection(event.conn.clone()))?;
         } else if let Some(event) = event.downcast::<PacketFromClientEvent>() {
             if let Some(packet) = event.packet.try_deserialize::<ClientBlockBreakStartPacket>() {
+                // Validate the target is inside the world *before* recording it in
+                // `conns_breaking` (and before touching breaking state), so an
+                // out-of-bounds click (e.g. a UI button in the screen corner whose
+                // cursor falls outside the world) can never crash the server or
+                // leave a stale breaking entry that a later stop would trip on.
+                let (world_w, world_h) = self.get_blocks().get_size();
+                if packet.x < 0 || packet.y < 0 || packet.x >= world_w as i32 || packet.y >= world_h as i32 {
+                    // Clear any previously recorded breaking pos for this conn so the
+                    // stale entry can't be dereferenced by a later start/stop.
+                    self.conns_breaking.remove(&event.conn);
+                    return Ok(());
+                }
+
                 if let Some(pos) = self.conns_breaking.get(&event.conn).copied() {
                     self.get_blocks().stop_breaking_block(events, pos.0, pos.1)?;
                 }
@@ -105,12 +118,6 @@ impl ServerBlocks {
 
                 let player_id = players.get_player_from_connection(&event.conn)?;
                 if let Some(player_id) = player_id {
-                    // ignore clicks outside the world so a near-edge click can't crash the server
-                    let (world_w, world_h) = self.get_blocks().get_size();
-                    if packet.x < 0 || packet.y < 0 || packet.x >= world_w as i32 || packet.y >= world_h as i32 {
-                        return Ok(());
-                    }
-
                     let held_item = entities.ecs.get::<&Inventory>(player_id)?.get_selected_item();
                     let tool = if let Some(item) = &held_item { items.get_item_type(item.item)?.tool } else { None };
 
@@ -122,7 +129,14 @@ impl ServerBlocks {
 
             if let Some(packet) = event.packet.try_deserialize::<BlockBreakStopPacket>() {
                 self.conns_breaking.remove(&event.conn);
-                self.get_blocks().stop_breaking_block(events, packet.x, packet.y)?;
+                // Guard the stop just like the start: a release outside the world
+                // (e.g. a UI button click raised in the screen corner) must not
+                // crash the server. stop_breaking_block errors on out-of-bounds,
+                // so only forward in-bounds coordinates.
+                let (world_w, world_h) = self.get_blocks().get_size();
+                if packet.x >= 0 && packet.y >= 0 && packet.x < world_w as i32 && packet.y < world_h as i32 {
+                    self.get_blocks().stop_breaking_block(events, packet.x, packet.y)?;
+                }
             } else if let Some(packet) = event.packet.try_deserialize::<BlockRightClickPacket>() {
                 let player = players.get_player_from_connection(&event.conn)?;
                 if let Some(player) = player {

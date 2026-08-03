@@ -50,7 +50,7 @@ impl ClientGases {
             }
         } else if let Some(event) = event.downcast::<Packet>() {
             if let Some(packet) = event.try_deserialize::<GasLayerUpdatePacket>() {
-                self.layer.deserialize(&packet.data)?;
+                self.layer.apply_chunk(&packet.chunk);
             }
         }
         Ok(())
@@ -60,11 +60,16 @@ impl ClientGases {
     /// debug visualizer. When enabled, the server periodically pushes fresh
     /// snapshots; when disabled, the client keeps its last-known layer.
     pub fn request_live_updates(&mut self, enabled: bool, networking: &mut ClientNetworking) -> Result<()> {
+        tracing::debug!(
+            "gas_overlay: request_live_updates enabled={enabled} live_updates_requested={}",
+            self.live_updates_requested
+        );
         if self.live_updates_requested == enabled {
             return Ok(());
         }
         networking.send_packet(Packet::new(ClientRequestGasDebugPacket { enabled })?)?;
         self.live_updates_requested = enabled;
+        tracing::debug!("gas_overlay: sent ClientRequestGasDebugPacket enabled={enabled}");
         Ok(())
     }
 
