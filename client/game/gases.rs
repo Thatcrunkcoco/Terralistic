@@ -79,6 +79,21 @@ impl ClientGases {
         &self.layer
     }
 
+    /// Returns the list of registered gas types with their overlay colors, in
+    /// registration order. This drives the ONI-style legend shown next to the
+    /// gas overlay so the player can map each color to a gas at a glance. The
+    /// colors match [`Self::color_for_gas`] (density-based), so the legend and
+    /// the cells always agree.
+    pub fn gas_legend(&self) -> Result<Vec<(String, crate::libraries::graphics::Color)>> {
+        let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut legend = Vec::new();
+        for id in gases.get_all_gas_type_ids() {
+            let gas_type = gases.get_gas_type(id)?;
+            legend.push((gas_type.name.clone(), Self::density_color(gas_type.density)));
+        }
+        Ok(legend)
+    }
+
     /// Maps a gas id to a display color for the debug overlay. Light gases (low
     /// density) read as cool cyan/blue and heavy gases as warm red/orange, so
     /// layering is intuitive at a glance. Unknown/empty gases read as magenta.

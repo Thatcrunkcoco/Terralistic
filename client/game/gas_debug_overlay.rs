@@ -6,10 +6,13 @@ use crate::libraries::graphics as gfx;
 use crate::shared::blocks::RENDER_BLOCK_WIDTH;
 use gfx::BaseUiElement;
 
-/// A debug-only overlay that paints every visible gas cell as a semi-transparent
-/// rectangle colored by gas type and brightened by pressure. It is meant for
-/// vacuum test worlds so the flow simulation (`pressure_rate` /
-/// `buoyancy_rate`) can be tuned by eye.
+/// An ONI-style gas overlay: when open it grays out the world beneath and paints
+/// every visible gas cell as a solid, saturated rectangle tinted by gas type
+/// (a per-gas color derived from density) and brightened by pressure, with a
+/// legend mapping each color to its gas name. Graying the terrain makes the gas
+/// masses the clear focus at a glance — the same look Oxygen Not Included uses
+/// for its overlay modes. It is meant for vacuum test worlds so the flow
+/// simulation (`pressure_rate` / `buoyancy_rate`) can be tuned by eye.
 ///
 /// It can be toggled with the G key, or (in debug mode only) by clicking the
 /// "Gases" icon shown in the corner. Toggling it on requests live gas layer
@@ -135,12 +138,27 @@ impl GasDebugOverlay {
         Ok(())
     }
 
-    /// Renders the overlay (gas cells) plus, in debug mode, the on-screen icon.
+    /// Renders the ONI-style gas overlay: gray out the terrain beneath, then draw
+    /// the gas cells in their per-gas colors on top, then a legend mapping those
+    /// colors to gas names.
+    ///
+    /// This is called right after the terrain (`background`/`walls`/`blocks`) is
+    /// drawn but *before* world entities and HUD render, so `render_gray_wash`
+    /// only mutes the world — players, items and UI stay readable on top of it.
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, gases: &ClientGases, camera: &Camera) -> Result<(), anyhow::Error> {
         if self.open {
+            self.render_gray_wash(graphics);
             self.render_gas_cells(graphics, gases, camera)?;
+            self.render_legend(graphics, gases)?;
         }
+        Ok(())
+    }
 
+    /// Renders the on-screen "Gases" toggle icon (HUD). Drawn after the world and
+    /// HUD elements so it always sits above them. The world-render parts of the
+    /// overlay live in [`Self::render`], which must be called earlier so the gray
+    /// wash only covers the terrain.
+    pub fn render_hud(&mut self, graphics: &mut gfx::GraphicsContext) {
         if self.debug {
             // reflect current state on the icon label (only rebuild when it changes)
             if self.open != self.label_state {
@@ -149,6 +167,55 @@ impl GasDebugOverlay {
                 self.label_state = self.open;
             }
             self.toggle_button.render(graphics, &gfx::Container::default(graphics));
+        }
+    }
+
+    /// Paints a translucent neutral-gray rectangle over the whole viewport. Blended
+    /// over the already-drawn terrain this desaturates the world toward monochrome,
+    /// the signature ONI overlay look, so the colored gas cells drawn on top of it
+    /// are unmistakable. The exact gray tone/opacity is a tuning tradeoff between a
+    /// faint tint and fully hiding the terrain.
+    fn render_gray_wash(&self, graphics: &gfx::GraphicsContext) {
+        let viewport = gfx::Rect::new(gfx::FloatPos(0.0, 0.0), graphics.get_window_size());
+        viewport.render(graphics, gfx::Color::new(90, 90, 90, 150));
+    }
+
+    /// Renders a small legend in the top-left corner: one row per registered gas,
+    /// a colored swatch (matching the cell color) beside its name.
+    fn render_legend(&self, graphics: &gfx::GraphicsContext, gases: &ClientGases) -> Result<(), anyhow::Error> {
+        let entries = gases.gas_legend()?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        const SWATCH: f32 = 20.0;
+        const ROW_GAP: f32 = 10.0;
+        const PAD: f32 = 12.0;
+        const TEXT_SCALE: f32 = 2.0;
+        let margin = gfx::SPACING as f32;
+
+        // Measure the panel so it fits the longest name, then draw the background.
+        let mut rows_height = 0.0f32;
+        let mut max_name_width = 0.0f32;
+        for (name, _) in &entries {
+            let text_size = graphics.font.get_text_size_scaled(name, TEXT_SCALE, None);
+            max_name_width = max_name_width.max(text_size.0);
+            rows_height += (SWATCH.max(text_size.1)) + ROW_GAP;
+        }
+        let panel_size = gfx::FloatSize(max_name_width + SWATCH + ROW_GAP + PAD * 2.0, rows_height + PAD * 2.0);
+        let panel = gfx::Rect::new(gfx::FloatPos(margin, margin), panel_size);
+        panel.render(graphics, gfx::Color::new(15, 15, 15, 190));
+
+        // One row per gas: a colored swatch, a small gap, then the name.
+        let mut y = margin + PAD;
+        for (name, color) in &entries {
+            let swatch_rect = gfx::Rect::new(gfx::FloatPos(margin + PAD, y), gfx::FloatSize(SWATCH, SWATCH));
+            swatch_rect.render(graphics, *color);
+            graphics
+                .font
+                .render_text(graphics, name, gfx::FloatPos(margin + PAD + SWATCH + ROW_GAP, y - 2.0), TEXT_SCALE);
+            let text_size = graphics.font.get_text_size_scaled(name, TEXT_SCALE, None);
+            y += (SWATCH.max(text_size.1)) + ROW_GAP;
         }
 
         Ok(())
@@ -185,8 +252,11 @@ impl GasDebugOverlay {
                 let pressure = cell.pressure;
                 let color = gases.color_for_gas(gas);
 
-                // Brightness scales with pressure so pockets/voids are obvious.
-                let intensity = (pressure.clamp(0.0, 200.0) / 200.0).clamp(0.1, 1.0);
+                // Brightness scales with pressure so pockets/voids are obvious, but
+                // the per-gas hue always stays the identity: even a faint trace of
+                // gas is readable, and the alpha is high so cells clearly pop
+                // against the grayed-out terrain behind them.
+                let intensity = (pressure.clamp(0.0, 200.0) / 200.0).clamp(0.35, 1.0);
                 let r = (color.r as f32 * intensity) as u8;
                 let g = (color.g as f32 * intensity) as u8;
                 let b = (color.b as f32 * intensity) as u8;
@@ -195,7 +265,7 @@ impl GasDebugOverlay {
                 let screen_y = y as f32 * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).1 * RENDER_BLOCK_WIDTH;
 
                 let rect = gfx::Rect::new(gfx::FloatPos(screen_x.round(), screen_y.round()), gfx::FloatSize(RENDER_BLOCK_WIDTH, RENDER_BLOCK_WIDTH));
-                let colors = [gfx::Color::new(r, g, b, 140); 4];
+                let colors = [gfx::Color::new(r, g, b, 235); 4];
                 let tex_rect = gfx::Rect::new(gfx::FloatPos(0.0, 0.0), gfx::FloatSize(1.0, 1.0));
                 rect_array.add_rect(&rect, &colors, &tex_rect);
 

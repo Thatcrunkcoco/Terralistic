@@ -174,8 +174,11 @@ pub fn run_game(
         background.render(graphics, &camera);
         walls.render(graphics, &camera, &frame_timer)?;
         blocks.render(graphics, &camera /*&frame_timer*/)?;
-        players.render(graphics, &mut entities.get_entities(), &camera);
+        // Draw the gas overlay immediately after the terrain (background/walls/
+        // blocks) but before players/items/HUD, so its gray wash only desaturates
+        // the world and the gas cells remain the focus while entities stay readable.
         gas_debug_overlay.render(graphics, &gases, &camera)?;
+        players.render(graphics, &mut entities.get_entities(), &camera);
         items.render(graphics, &camera, &mut entities.get_entities())?;
         floating_text.render(graphics, &camera);
         lights.render(graphics, &camera, &blocks.get_blocks(), settings, &frame_timer)?;
@@ -183,6 +186,9 @@ pub fn run_game(
         block_selector.render(graphics, &mut networking, &camera)?;
         inventory.render(graphics, &items, &mut networking, &blocks.get_blocks())?;
         health.render(graphics);
+        // The gas overlay's toggle icon is HUD and must render on top of the world
+        // (the gray wash + gas cells themselves rendered much earlier).
+        gas_debug_overlay.render_hud(graphics);
         chat.render(graphics);
         respawn_screen.render(graphics);
 
