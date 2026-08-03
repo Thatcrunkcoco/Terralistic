@@ -506,6 +506,45 @@ impl WorldGenerator {
             tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
         }
 
+        // --- Second gas demonstration room: a sealed 5x5 box identical in size
+        // to the first, holding a *different* gas so the debug overlay can be
+        // compared across two self-contained pockets. Interior spans
+        // x in [463..468], y in [174..179] (5 wide x 5 tall), matching the first
+        // room. Matching cell coordinates live in `ServerGases::seed_test_gases`.
+        //
+        // Box footprint (x in [454..476]) is cleared first so trees don't overlap
+        // it, then the walls, staircases, and interior are built exactly like the
+        // first box but shifted 35 blocks left.
+        for x in 454..476 {
+            for y in 170..181 {
+                block_terrain[x as usize][y as usize] = air;
+                wall_terrain[x as usize][y as usize] = walls.clear;
+            }
+        }
+        // Left + right wall columns (1 block thick), floor at y=179, ceiling at y=173.
+        for x in [462, 468] {
+            for y in 173..180 {
+                tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+            }
+        }
+        // Floor and ceiling slabs across the interior.
+        for x in 463..468 {
+            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
+        }
+        // Left staircase ascending from ground up over the left wall.
+        for i in 0..8 {
+            let x = 454 + i;
+            let y = 179 - i;
+            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+        }
+        // Right staircase descending from the right wall back down to ground.
+        for i in 0..7 {
+            let x = 469 + i;
+            let y = 173 + i;
+            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+        }
+
         blocks.create_from_block_ids(&block_terrain)?;
         walls.create_from_wall_ids(&wall_terrain)?;
 

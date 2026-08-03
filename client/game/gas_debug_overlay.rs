@@ -242,6 +242,8 @@ impl GasDebugOverlay {
         let mut drawn = 0usize;
 
         let mut rect_array = gfx::RectArray::new();
+        let mut colored = 0usize;
+        let mut first_colored: Option<(i32, i32, i32)> = None;
         'outer: for x in start_x..end_x {
             for y in start_y..end_y {
                 let cell = layer.get_cell(x, y)?;
@@ -249,26 +251,37 @@ impl GasDebugOverlay {
                 if gas.is_none() {
                     continue;
                 }
-                let pressure = cell.pressure;
-                let color = gases.color_for_gas(gas);
-
-                // Brightness scales with pressure so pockets/voids are obvious, but
-                // the per-gas hue always stays the identity: even a faint trace of
-                // gas is readable, and the alpha is high so cells clearly pop
-                // against the grayed-out terrain behind them.
-                let intensity = (pressure.clamp(0.0, 200.0) / 200.0).clamp(0.35, 1.0);
-                let r = (color.r as f32 * intensity) as u8;
-                let g = (color.g as f32 * intensity) as u8;
-                let b = (color.b as f32 * intensity) as u8;
 
                 let screen_x = x as f32 * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).0 * RENDER_BLOCK_WIDTH;
                 let screen_y = y as f32 * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).1 * RENDER_BLOCK_WIDTH;
-
                 let rect = gfx::Rect::new(gfx::FloatPos(screen_x.round(), screen_y.round()), gfx::FloatSize(RENDER_BLOCK_WIDTH, RENDER_BLOCK_WIDTH));
-                let colors = [gfx::Color::new(r, g, b, 235); 4];
                 let tex_rect = gfx::Rect::new(gfx::FloatPos(0.0, 0.0), gfx::FloatSize(1.0, 1.0));
+
+                // The whole world is filled with the base atmosphere ("air") at
+                // ~uniform pressure. Painting it with a full, saturated color would
+                // fill the screen with one flat olive wash and bury the interesting
+                // gases. So atmosphere cells are drawn as a faint, neutral tint —
+                // preserving a sense of "empty world" — while every other gas gets a
+                // vivid, near-full-brightness overlay so sealed pockets clearly pop.
+                let (r, g, b, a) = if gases.is_atmosphere(gas) {
+                    let faint = (90.0 * 0.45) as u8; // muted gray, just above the wash
+                    (faint, faint, faint, 90)
+                } else {
+                    let color = gases.color_for_gas(gas);
+                    // Non-atmosphere gases render at full brightness so pockets are
+                    // impossible to miss, regardless of the (fairly uniform) pressure.
+                    (color.r, color.g, color.b, 235)
+                };
+
+                let colors = [gfx::Color::new(r, g, b, a); 4];
                 rect_array.add_rect(&rect, &colors, &tex_rect);
 
+                if !gases.is_atmosphere(gas) {
+                    colored += 1;
+                    if first_colored.is_none() {
+                        first_colored = Some((x, y, gas.raw()));
+                    }
+                }
                 drawn += 1;
                 if drawn >= max_cells {
                     break 'outer;
@@ -277,15 +290,31 @@ impl GasDebugOverlay {
         }
 
         // A single solid white pixel texture lets us render colored, textured
-        // rects without needing per-gas textures.
+        // rects without needing per-gas textures. The surface must be filled
+        // with an opaque white pixel FIRST: `Surface::new` initializes pixels
+        // to fully transparent black (0,0,0,0), and since the shader multiplies
+        // the sampled texel by the vertex color, a blank surface would make every
+        // gas cell render invisible (`<anything> * (0,0,0,0) == (0,0,0,0)`).
         static WHITE_PIXEL: std::sync::OnceLock<gfx::Texture> = std::sync::OnceLock::new();
         let white = WHITE_PIXEL.get_or_init(|| {
-            let surface = gfx::Surface::new(gfx::IntSize(1, 1));
+            let mut surface = gfx::Surface::new(gfx::IntSize(1, 1));
+            if let Ok(pixel) = surface.get_pixel_mut(gfx::IntPos(0, 0)) {
+                *pixel = gfx::Color::new(255, 255, 255, 255);
+            }
             gfx::Texture::load_from_surface(&surface)
         });
 
         rect_array.update();
         rect_array.render(graphics, Some(white), gfx::FloatPos(0.0, 0.0));
+
+        // Debug: log how many gas cells were drawn this frame and the visible
+        // cell range, so we can tell whether the overlay is rendering anything at
+        // all and whether the demo-room coords fall inside the viewport.
+        if drawn > 0 || tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "gas[client/render] drawn={drawn} colored={colored} first_colored={first_colored:?} visible_x=[{start_x}..{end_x}) y=[{start_y}..{end_y}) layer=({width}x{height})",
+            );
+        }
 
         Ok(())
     }

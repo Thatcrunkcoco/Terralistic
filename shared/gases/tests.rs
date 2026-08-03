@@ -481,4 +481,77 @@ mod tests {
         assert!((world.p(0, 0) - 100.0).abs() < 0.01, "top drifted: {}", world.p(0, 0));
         assert!((world.p(0, 1) - 100.0).abs() < 0.01, "bottom drifted: {}", world.p(0, 1));
     }
+
+    #[test]
+    fn test_world_boxes_survive_flow_and_produce_diff() {
+    // Reproduce the flat test world scenario: a 512x256 world filled with air
+    // (raw 0) at pressure 100, containing two sealed 5x5 boxes. Room1 at
+    // x in [498..503] has co2(1)/air(0)/oxygen(2)/hydrogen(3); room2 at
+    // x in [463..468] is all hydrogen(3). Activate-all, run many flow ticks,
+    // then check update_chunks still reports the box pockets as differing.
+    let w = 512u32; let h = 256u32;
+    let air = GasId::from_raw(0);
+    let co2 = GasId::from_raw(1);
+    let oxy = GasId::from_raw(2);
+    let hyd = GasId::from_raw(3);
+    let mut gases = Gases::new();
+    let _ = gases.register_new_gas_type(GasType::new("air".to_owned(), 1.2));
+    let _ = gases.register_new_gas_type(GasType::new("co2".to_owned(), 1.98));
+    let _ = gases.register_new_gas_type(GasType::new("oxygen".to_owned(), 1.43));
+    let _ = gases.register_new_gas_type(GasType::new("hydrogen".to_owned(), 0.09));
+
+    let mut layer = GasLayer::new();
+    layer.create((w, h), air, 100.0);
+    let flow = GasFlow::with_params(GasFlowParams { pressure_rate: 0.08, buoyancy_rate: 0.02 });
+
+    // Build an OpenMap with the box walls solid (matching stone_box). The boxes
+    // occupy interior x in [498..503]/[463..468], y in [174..179]; walls are the
+    // ring just outside the interior.
+    let mut map = OpenMap::new(w, h);
+    let seal_box = |map: &mut OpenMap, x0: i32, x1: i32, y0: i32, y1: i32| {
+        for x in (x0)..=(x1) { map.set_solid(x, y0 - 1); map.set_solid(x, y1); }
+        for y in (y0)..=(y1) { map.set_solid(x0 - 1, y); map.set_solid(x1, y); }
+    };
+    seal_box(&mut map, 498, 503, 174, 179);
+    seal_box(&mut map, 463, 468, 174, 179);
+
+    // Seed room1
+    for y in 174..179 {
+        let gas = if y < 176 { co2 } else if y < 178 { air } else { hyd };
+        for x in 498..503 { layer.set_cell(x, y, GasCell::new(gas, 100.0)).unwrap(); }
+    }
+    for x in 500..502 { for y in 176..177 { layer.set_cell(x, y, GasCell::new(oxy, 150.0)).unwrap(); } }
+    // Seed room2
+    for x in 463..468 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 100.0)).unwrap(); } }
+
+    let mut flow = flow;
+    flow.activate_all(w, h);
+
+    // After seeding, before flow: update_chunks must report >0 diff cells.
+    let pre_chunks = layer.update_chunks(3000);
+    let pre_diff: usize = pre_chunks.iter().map(|c| c.indexes.len()).sum();
+    eprintln!("PRE-FLOW diff cells = {pre_diff}");
+    assert!(pre_diff > 0, "boxes not seen as differing from base before flow!");
+
+    // Run flow ticks enough for containment + relayer to settle (the sealed
+    // pockets must persist, so a moderate iteration count is plenty).
+    for _ in 0..2_000 {
+        flow.tick(&mut layer, &|x: i32, y: i32| map.is_open(x, y),
+            &|g| if g.is_none() { 0.0 } else { gases.get_gas_type(g).map(|t| t.density).unwrap_or(0.0) });
+    }
+
+    let post_chunks = layer.update_chunks(3000);
+    let post_diff: usize = post_chunks.iter().map(|c| c.indexes.len()).sum();
+    let base = post_chunks.first().map(|c| format!("{}@{}", c.base.gas.raw(), c.base.pressure as i32)).unwrap();
+    eprintln!("POST-FLOW diff cells = {post_diff}, base = {base}");
+    let cell = |x: i32, y: i32| -> String {
+        match layer.get_cell(x, y) {
+            Ok(c) => format!("{}@{}", c.gas.raw(), c.pressure as i32),
+            Err(_) => "ERR".to_owned(),
+        }
+    };
+    eprintln!("status room1(500,174)={} room1(500,178)={} room2(465,174)={} room2(465,178)={}",
+        cell(500,174), cell(500,178), cell(465,174), cell(465,178));
+    assert!(post_diff > 0, "boxes disappeared from diff after flow!");
+    }
 }

@@ -143,6 +143,49 @@ impl ServerGases {
                 }
             }
         }
+
+        // Second sealed demo room, x in [463..468], y in [174..179] (5x5),
+        // matching the box built in `WorldGenerator::generate_test`. This room
+        // is filled almost entirely with hydrogen so it renders as a distinct
+        // light single-colored pocket in the debug overlay, contrasting with
+        // the first room's co2/air/hydrogen mix.
+        if !hydrogen.is_none() {
+            for x in 463..468 {
+                for y in 174..179 {
+                    let _ = self.layer.set_cell(x, y, GasCell::new(hydrogen, 100.0));
+                    self.flow.activate(x as u32, y as u32, width, height);
+                }
+            }
+        }
+
+        // Debug instrumentation: dump the seeded box cells so we can confirm the
+        // layer actually holds the demo gases before any flow tick runs. Each log
+        // line is `gas.raw()` (or -2 for NONE) then pressure. Room 1 is the right
+        // box (x 498..503), room 2 the left box (x 463..468).
+        tracing::debug!(
+            "gas[seed] layer={}x{} — room1 interior:",
+            width,
+            height
+        );
+        for y in 174..179 {
+            let row: Vec<String> = (498..503)
+                .map(|x| match self.layer.get_cell(x, y) {
+                    Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
+                    Err(_) => "ERR".to_owned(),
+                })
+                .collect();
+            tracing::debug!("gas[seed]   room1 y={y}: {}", row.join(" "));
+        }
+        tracing::debug!("gas[seed] room2 interior:");
+        for y in 174..179 {
+            let row: Vec<String> = (463..468)
+                .map(|x| match self.layer.get_cell(x, y) {
+                    Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
+                    Err(_) => "ERR".to_owned(),
+                })
+                .collect();
+            tracing::debug!("gas[seed]   room2 y={y}: {}", row.join(" "));
+        }
     }
 
     /// Handles server events relevant to gases: sends the welcome layer to new
@@ -151,7 +194,7 @@ impl ServerGases {
         if let Some(event) = event.downcast::<NewConnectionEvent>() {
             match self.layer.serialize() {
                 Ok(data) => {
-                    tracing::trace!("gas: sending welcome layer ({} bytes)", data.len());
+                    tracing::debug!("gas: sending welcome layer ({} bytes)", data.len());
                     match Packet::new(GasLayerWelcomePacket { data }) {
                         Ok(packet) => {
                             if let Err(e) = networking.send_packet(&packet, SendTarget::Connection(event.conn.clone())) {
@@ -244,10 +287,46 @@ impl ServerGases {
                 // (and therefore no framed-TCP frame) can exceed the wire limit,
                 // even when gas pressures vary across a large open world.
                 let chunks = self.layer.update_chunks(GAS_DEBUG_CHUNK_MAX_CELLS);
+                // Count how many differing cells the live snapshot actually carries
+                // (sum of all chunk index slices) to sanity-check the server layer.
+                let diff_cells: usize = chunks.iter().map(|c| c.indexes.len()).sum();
+                // Diagnostic: dump the actual gas distribution the server sees so
+                // we can tell whether the layer is uniform (and in what) vs holding
+                // distinct box pockets. Keyed by "gasRaw@pressure".
+                {
+                    let mut dist: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+                    for c in self.layer.cells() {
+                        let key = format!("{}@{}", c.gas.raw(), c.pressure as i32);
+                        *dist.entry(key).or_insert(0) += 1;
+                    }
+                    let mut top: Vec<_> = dist.into_iter().collect();
+                    top.sort_by(|a, b| b.1.cmp(&a.1));
+                    let top_s: String = top.iter().take(6).map(|(k, n)| format!("{k}:{n}")).collect::<Vec<_>>().join(" ");
+                    let base = chunks.first().map(|c| {
+                        format!("{}@{}", c.base.gas.raw(), c.base.pressure as i32)
+                    }).unwrap_or_else(|| "none".to_owned());
+                    tracing::debug!("gas[dist] n_distinct_cells={} base={base} top: {top_s}", top.len());
+                }
                 tracing::debug!(
-                    "gas: pushing live update: {} conns, {} chunks",
+                    "gas: pushing live update: {} conns, {} chunks, {} diff cells",
                     self.gas_debug_conns.len(),
-                    chunks.len()
+                    chunks.len(),
+                    diff_cells
+                );
+                // Periodic confirmation that the two demo rooms still hold gas
+                // (sparse dump of one representative column each, once per update).
+                let probe = |x: i32, y: i32| -> String {
+                    match self.layer.get_cell(x, y) {
+                        Ok(c) => format!("g{}@{}", c.gas.raw(), c.pressure as i32),
+                        Err(_) => "ERR".to_owned(),
+                    }
+                };
+                tracing::debug!(
+                    "gas[status] room1(500,174)={} room1(500,178)={} room2(465,174)={} room2(465,178)={}",
+                    probe(500, 174),
+                    probe(500, 178),
+                    probe(465, 174),
+                    probe(465, 178),
                 );
                 for chunk in chunks {
                     let packet = Packet::new(GasLayerUpdatePacket { chunk })?;

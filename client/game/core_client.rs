@@ -71,12 +71,13 @@ pub fn run_game(
         let walls = ClientWalls::new(&mut blocks.get_blocks());
         let entities = ClientEntities::new();
         let mut items = ClientItems::new();
-        let gases = ClientGases::new();
+        let mut gases = ClientGases::new();
 
         while let Some(event) = pre_events.pop_event() {
             mods.on_event(&event)?;
             blocks.on_event(&event, &mut pre_events, &mut networking)?;
             walls.on_event(&event)?;
+            gases.on_event(&event)?;
             items.on_event(&event, &mut entities.get_entities(), &mut pre_events)?;
         }
 

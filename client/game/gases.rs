@@ -47,13 +47,53 @@ impl ClientGases {
         if let Some(event) = event.downcast::<WelcomePacketEvent>() {
             if let Some(packet) = event.packet.try_deserialize::<GasLayerWelcomePacket>() {
                 self.layer.deserialize(&packet.data)?;
+                self.log_layer_stats("welcome");
             }
         } else if let Some(event) = event.downcast::<Packet>() {
             if let Some(packet) = event.try_deserialize::<GasLayerUpdatePacket>() {
                 self.layer.apply_chunk(&packet.chunk);
+                if packet.chunk.start_of_frame {
+                    self.log_layer_stats("live-frame");
+                }
             }
         }
         Ok(())
+    }
+
+    /// Debug helper: logs the dimensions of the mirrored gas layer plus a count
+    /// of non-`air` cells, so we can see whether the test-room gases actually made
+    /// it to the client. Air is identified by the gas registered under the name
+    /// "air"; any cell that is empty (NONE) or a different gas counts as
+    /// "non-air", which is what the overlay is meant to highlight.
+    fn log_layer_stats(&self, source: &str) {
+        let (w, h) = self.layer.get_size();
+        let air_id = self
+            .gases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_gas_id_by_name("air");
+        let mut non_air = 0usize;
+        let mut none = 0usize;
+        let mut first_non_air: Option<(usize, i32, f32)> = None;
+        for (i, c) in self.layer.cells().iter().enumerate() {
+            if c.gas.is_none() {
+                none += 1;
+            } else if air_id != Some(c.gas) {
+                non_air += 1;
+                if first_non_air.is_none() {
+                    first_non_air = Some((i, c.gas.raw(), c.pressure));
+                }
+            }
+        }
+        tracing::debug!(
+            "gas[client/{source}] layer {}x{} total={} none={} non_air={} first_non_air={:?}",
+            w,
+            h,
+            w.saturating_mul(h),
+            none,
+            non_air,
+            first_non_air
+        );
     }
 
     /// Enables or disables live gas layer updates from the server, used by the
@@ -92,6 +132,22 @@ impl ClientGases {
             legend.push((gas_type.name.clone(), Self::density_color(gas_type.density)));
         }
         Ok(legend)
+    }
+
+    /// Whether the given gas is the world's default breathable atmosphere
+    /// (registered as "air"). The overlay treats this specially: since air fills
+    /// virtually the entire world at uniform pressure, rendering it the same as
+    /// notable gases would paint everything one flat color and drown out the
+    /// pockets we actually want to highlight. Air is instead rendered faint and
+    /// neutral so the world reads as gray and only non-air gases stand out.
+    #[must_use]
+    pub fn is_atmosphere(&self, gas: GasId) -> bool {
+        let air_id = self
+            .gases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_gas_id_by_name("air");
+        air_id == Some(gas)
     }
 
     /// Maps a gas id to a display color for the debug overlay. Light gases (low

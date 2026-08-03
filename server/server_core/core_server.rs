@@ -242,9 +242,17 @@ impl Server {
         self.gases.initialize_world(&self.blocks.get_blocks());
 
         // Seed the sealed gas demo room (only present in the flat test world) so
-        // the debug overlay has layered gases to visualize.
+        // the debug overlay has layered gases to visualize. Log whether the seed
+        // actually applied so we can immediately tell if a session is on the
+        // reserved flat test world (name "test", seed 123).
         if self.world_name == "test" && self.world_seed == 123 {
             self.gases.seed_test_gases();
+            tracing::debug!("gas: seeded demo gas rooms (world '{}' seed {})", self.world_name, self.world_seed);
+        } else {
+            tracing::debug!(
+                "gas: NOT seeding demo rooms — world '{}' seed {} is not the reserved test world",
+                self.world_name, self.world_seed
+            );
         }
 
         self.set_state(ServerState::Running);
