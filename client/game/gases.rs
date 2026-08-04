@@ -124,10 +124,18 @@ impl ClientGases {
     /// gas overlay so the player can map each color to a gas at a glance. The
     /// colors match [`Self::color_for_gas`] (name-based), so the legend and the
     /// cells always agree. Unknown gases fall back to a density-derived color.
+    ///
+    /// The atmosphere ("air") is excluded: it fills the whole world, so it is
+    /// not a notable gas the player hunts for, and listing it in the key would
+    /// just add noise. Only non-atmosphere gases appear.
     pub fn gas_legend(&self) -> Result<Vec<(String, crate::libraries::graphics::Color)>> {
         let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let air_id = gases.get_gas_id_by_name("air");
         let mut legend = Vec::new();
         for id in gases.get_all_gas_type_ids() {
+            if Some(id) == air_id {
+                continue; // skip the atmosphere; it's not a highlighted gas
+            }
             let gas_type = gases.get_gas_type(id)?;
             legend.push((gas_type.name.clone(), Self::gas_color(&gas_type.name, gas_type.density)));
         }
