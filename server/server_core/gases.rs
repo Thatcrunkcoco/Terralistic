@@ -115,13 +115,15 @@ impl ServerGases {
         }
     }
 
-    /// Seeds the four gas demonstration boxes in the "test" world — one sealed
-    /// 5x5 container per gas (air, co2, oxygen, hydrogen) — so the debug overlay
-    /// has a distinct pocket for each. The boxes sit side by side in a connected
-    /// row (matching `WorldGenerator::generate_test`), so breaking the thin
-    /// shared walls between neighbors lets the gases mix and re-layer by density.
-    /// Interiors (left→right): air x[246..251], co2 x[252..257], oxygen
-    /// x[258..263], hydrogen x[264..269], all y in [174..179].
+    /// Seeds the gas demonstration boxes in the "test" world — one sealed 5x5
+    /// container per notable gas (co2, oxygen, hydrogen). The boxes sit side by
+    /// side in a connected row (matching `WorldGenerator::generate_test`), so
+    /// breaking the thin shared walls between neighbors lets the gases mix and
+    /// re-layer by density. Air needs no container: it is the world's ambient
+    /// atmosphere, so every open cell is already air and a dedicated box would
+    /// render identically to (and be invisible against) the surrounding world.
+    /// Interiors (left→right): co2 x[250..255], oxygen x[256..261], hydrogen
+    /// x[262..267], all y in [174..179].
     pub fn seed_test_gases(&mut self) {
         let (width, height) = self.layer.get_size();
         if width == 0 || height == 0 {
@@ -131,18 +133,17 @@ impl ServerGases {
             let gases = self.gases.lock().unwrap_or_else(PoisonError::into_inner);
             gases.get_gas_id_by_name(name)
         };
-        let air = id_of("air").unwrap_or(GasId::NONE);
         let hydrogen = id_of("hydrogen").unwrap_or(GasId::NONE);
         let co2 = id_of("co2").unwrap_or(GasId::NONE);
         let oxygen = id_of("oxygen").unwrap_or(GasId::NONE);
 
-        // One box per gas, in world order. Each 5x5 interior is filled with a
-        // single gas so the overlay shows four clean, comparable pockets.
-        let boxes: [(i32, i32, GasId); 4] = [
-            (246, 251, air),
-            (252, 257, co2),
-            (258, 263, oxygen),
-            (264, 269, hydrogen),
+        // One box per non-atmosphere gas. Each 5x5 interior is filled with a
+        // single gas so the overlay shows clean, comparable, distinctly-colored
+        // pockets against the air-filled world.
+        let boxes: [(i32, i32, GasId); 3] = [
+            (250, 255, co2),
+            (256, 261, oxygen),
+            (262, 267, hydrogen),
         ];
         for (x0, x1, gas) in boxes {
             if gas.is_none() {
@@ -160,7 +161,7 @@ impl ServerGases {
         // holds the demo gas before any flow tick runs. Each line lists
         // `gas.raw()` (or -2 for NONE) per row.
         tracing::debug!("gas[seed] layer={}x{} — demo boxes:", width, height);
-        for (label, x0, x1) in [("air", 246, 251), ("co2", 252, 257), ("oxygen", 258, 263), ("hydrogen", 264, 269)] {
+        for (label, x0, x1) in [("co2", 250, 255), ("oxygen", 256, 261), ("hydrogen", 262, 267)] {
             for y in 174..179 {
                 let row: Vec<String> = (x0..x1)
                     .map(|x| match self.layer.get_cell(x, y) {
@@ -307,11 +308,10 @@ impl ServerGases {
                     }
                 };
                 tracing::debug!(
-                    "gas[status] air(248,174)={} co2(254,174)={} oxygen(260,174)={} hydrogen(266,174)={}",
-                    probe(248, 174),
-                    probe(254, 174),
-                    probe(260, 174),
-                    probe(266, 174),
+                    "gas[status] co2(252,174)={} oxygen(258,174)={} hydrogen(264,174)={}",
+                    probe(252, 174),
+                    probe(258, 174),
+                    probe(264, 174),
                 );
                 for chunk in chunks {
                     let packet = Packet::new(GasLayerUpdatePacket { chunk })?;
