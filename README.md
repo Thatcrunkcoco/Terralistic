@@ -208,6 +208,20 @@ triggered it, making the fix straightforward.
 
 ---
 
+## Agent Handoff / Session Continuity
+
+To let an agent pick up where it left off across sessions, this repo uses a handoff
+loop. **At the start of any session, read `CONTEXT.md`** — it holds the current
+state and the `## Next Up` item. When a working block is done (or you want to pause),
+say *"summarize"* and the agent distills the session back into `CONTEXT.md` and
+appends a dated entry to `session_summaries/`.
+
+- `CONTEXT.md` — current handoff state (single source of truth for agent intent).
+- `session_summaries/` — append-only history.
+- `.agents/` — agent recipes (`handoff.md`) and orientation (`AGENTS.md`).
+
+---
+
 ## Testing
 
 The project has an **Rust unit-test suite** run with:
