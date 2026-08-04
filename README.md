@@ -161,6 +161,30 @@ Block/tile-entity changes are pushed from the server to clients through a generi
 per-block state blob, so dynamic state (like furnace progress) can reach clients for
 display without bespoke per-system packets.
 
+### Substance layer & flow (gases + liquids)
+
+A single shared substance cell layer (`shared/gases/*` — `Gas*` naming retained)
+models both **gases and liquids** uniformly: a liquid is just a registered "gas type"
+dense enough to sink below air and pool. Each cell holds a substance id + a fixed
+`amount` (capped at `GAS_CELL_MAX_AMOUNT`, so flow is **incompressible / fixed-volume**).
+`GasFlow::tick` runs three passes — level-equalization, apply, and density-driven
+buoyancy swap — over an **Activity-Scheduler wavefront**, so only perturbed cells cost
+work per tick and stable/sealed regions go dormant. Liquids are declared in
+`base_game/gases.lua` (water, magma) and simulated through the exact same path as
+gases. Break a sealed demo box in the test world to watch gases mix/re-layer or a
+liquid pool on the ground.
+
+### Overlay framework
+
+A generic, data-driven overlay system (`client/game/overlay.rs`) so overlays are
+"write a provider" rather than hand-rolled. An `OverlayProvider` exposes
+`cell_color`/`legend`/`world_size`; the shared `Overlay` handles the G-hotkey toggle,
+gray wash, culled+batched rendering (capped at 120k cells/frame), and legend panel.
+Flowing substances live in the layer and adapt via `GasOverlayProvider`
+(`client/game/gas_overlay.rs`); future overlays (electrical, plumbing, item transport)
+can add their own providers — networks live in block/tile-entity space, substances in
+the layer, both feeding the one generic overlay.
+
 ### Debug Logging
 
 Runtime trace + crash capture, enabled with the `--debug` CLI flag (see below).
@@ -240,6 +264,10 @@ Tests cover the engine's core systems:
 - Event management
 - Player state save/load round-trips
 - World-generation terrain-height shaping
+- Substance (gas + liquid) flow: fixed-volume leveling/equalization, mass
+  conservation, containment in sealed pockets, solid-wall blocking, density-driven
+  buoyancy layering (heavy sinks / light rises), and liquids pooling below gas on the
+  shared layer
 
 ---
 
