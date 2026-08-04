@@ -263,6 +263,13 @@ fn server_main(args: &[String]) {
         Server::new(MULTIPLAYER_PORT, None, None)
     };
 
+    // Debug/diagnostic: `--test` forces the flat test world (name "test", seed
+    // 123), which is where the sealed gas demo rooms live. Without this flag the
+    // headless server would generate an ordinary noise world and never seed gas.
+    if args.contains(&"--test".to_owned()) {
+        server.set_world_params(123, "test");
+    }
+
     if let Some(graphics) = server_graphics_context {
         let mut manager = UiManager::new(server, graphics, srv_to_ui_event_receiver, ui_to_srv_event_sender, path_clone);
         let res = manager.run(&server_running, &loading_text, vec![include_bytes!("base_game/base_game.mod").to_vec()], &path.join("server.world"));

@@ -185,10 +185,11 @@ impl SecondaryMenu {
         settings: Rc<RefCell<Settings>>,
         global_settings: Rc<RefCell<GlobalSettings>>,
         menu_back: &dyn UiElement,
+        debug: bool,
     ) -> bool {
         let menu: (Box<dyn Menu>, String) = match menu_index {
             0 => (Box::new(LoginMenu::new(graphics)), "LoginMenu".to_owned()),
-            1 => (Box::new(SingleplayerSelector::new(graphics, settings, global_settings)), "SingleplayerSelector".to_owned()),
+            1 => (Box::new(SingleplayerSelector::new(graphics, settings, global_settings, debug)), "SingleplayerSelector".to_owned()),
             2 => {
                 let res = MultiplayerSelector::new(graphics, settings, global_settings);
                 if let Ok(menu) = res {

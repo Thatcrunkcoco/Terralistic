@@ -33,13 +33,21 @@ pub struct WorldCreationMenu {
     worlds_list: Vec<String>,
     settings: Rc<RefCell<Settings>>,
     global_settings: Rc<RefCell<GlobalSettings>>,
+    debug: bool,
     world_path: std::path::PathBuf,
     close_self: bool,
     open_menu: Option<(Box<dyn Menu>, String)>,
 }
 
 impl WorldCreationMenu {
-    pub fn new(graphics: &gfx::GraphicsContext, worlds_list: Vec<String>, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>) -> Result<Self> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        graphics: &gfx::GraphicsContext,
+        worlds_list: Vec<String>,
+        settings: Rc<RefCell<Settings>>,
+        global_settings: Rc<RefCell<GlobalSettings>>,
+        debug: bool,
+    ) -> Result<Self> {
         let base_dirs = BaseDirs::new().ok_or_else(|| anyhow::anyhow!("Failed to get base directories"))?;
         let world_path = base_dirs.data_dir().to_path_buf();
         let mut title = gfx::Sprite::new();
@@ -108,6 +116,7 @@ impl WorldCreationMenu {
             worlds_list,
             settings,
             global_settings,
+            debug,
             world_path,
             close_self: false,
             open_menu: None,
@@ -122,7 +131,7 @@ impl WorldCreationMenu {
         let name = self.world_name_input.get_text().clone();
         let seed = self.world_seed_input.get_text().parse::<u64>().unwrap_or(0);
 
-        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), seed, name, self.settings.clone(), self.global_settings.clone()) {
+        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), seed, name, self.settings.clone(), self.global_settings.clone(), self.debug) {
             self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
         }
 

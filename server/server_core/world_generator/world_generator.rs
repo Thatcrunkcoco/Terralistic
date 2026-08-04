@@ -467,6 +467,47 @@ impl WorldGenerator {
             place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
+        // --- Gas demonstration containers: three sealed 5x5 stone boxes set in
+        // a single physically-connected row, one gas per box (co2, oxygen,
+        // hydrogen) so the player can break the thin shared walls between
+        // neighbors and watch the gases mix and re-layer by density. The whole
+        // world's ambient atmosphere *is* the "air" container — air is registered
+        // as the breathable atmosphere, so every open cell is air. A dedicated
+        // air box would render identically to the surrounding world (the overlay
+        // deliberately de-emphasizes atmosphere), so a separate air container is
+        // redundant: breaking into any box already lets world-air flood in.
+        //
+        // The structure is centered on the player spawn (x≈256) so it is
+        // instantly reachable. Each box has a floor (y=179) and ceiling (y=173);
+        // neighbors share a 1-block-thick stone wall, and the outer left/right
+        // ends are capped with a wall too. No staircases: the gas debug overlay
+        // renders straight through solid blocks, and breaking walls is what opens
+        // the containers. Matching cell coordinates live in `ServerGases::seed_test_gases`.
+        //
+        // Box interiors, left→right: co2 x[250..255], oxygen x[256..261],
+        // hydrogen x[262..267]. Walls sit at x in [249, 255, 261, 267] spanning
+        // y in [173..180].
+        //
+        // Structure footprint (x in [249..268]) is cleared first so trees don't
+        // overlap it, then floor, ceiling, walls, and interiors are built.
+        for y in 170..181 {
+            for x in 249..268 {
+                block_terrain[x as usize][y as usize] = air;
+                wall_terrain[x as usize][y as usize] = walls.clear;
+            }
+        }
+        // Floor and ceiling slabs spanning the whole structure.
+        for x in 249..268 {
+            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
+        }
+        // Outer left/right caps and the two internal shared walls.
+        for wx in [249, 255, 261, 267] {
+            for y in 173..180 {
+                tset(&mut block_terrain, wx, y, width, height_u as i32, stone_block);
+            }
+        }
+
         blocks.create_from_block_ids(&block_terrain)?;
         walls.create_from_wall_ids(&wall_terrain)?;
 

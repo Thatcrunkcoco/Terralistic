@@ -11,6 +11,9 @@ use crate::client::game::debug_menu::DebugMenu;
 use crate::client::game::entities::ClientEntities;
 use crate::client::game::floating_text::FloatingTextManager;
 use crate::client::game::framerate_measurer::FramerateMeasurer;
+use crate::client::game::gas_overlay::GasOverlayProvider;
+use crate::client::game::gases::ClientGases;
+use crate::client::game::overlay::Overlay;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
 use crate::client::game::items::ClientItems;
@@ -34,6 +37,7 @@ use super::networking::ClientNetworking;
 use super::walls::ClientWalls;
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_game(
     graphics: &mut gfx::GraphicsContext,
     server_port: u16,
@@ -41,6 +45,7 @@ pub fn run_game(
     player_name: &str,
     settings: &Rc<RefCell<Settings>>,
     global_settings: &Rc<RefCell<GlobalSettings>>,
+    debug: bool,
 ) -> Result<()> {
     // load base game mod
     let mut pre_events = EventManager::new();
@@ -60,29 +65,32 @@ pub fn run_game(
     let loading_text = Arc::new(Mutex::new("Loading".to_owned()));
     let loading_text2 = loading_text;
 
-    let temp_fn = || -> Result<(ClientModManager, ClientBlocks, ClientWalls, ClientEntities, ClientItems, ClientNetworking)> {
+    let temp_fn = || -> Result<(ClientModManager, ClientBlocks, ClientWalls, ClientEntities, ClientItems, ClientGases, ClientNetworking)> {
         "Loading mods".clone_into(&mut loading_text2.lock().unwrap_or_else(PoisonError::into_inner));
         let mut mods = ClientModManager::new();
         let mut blocks = ClientBlocks::new();
         let walls = ClientWalls::new(&mut blocks.get_blocks());
         let entities = ClientEntities::new();
         let mut items = ClientItems::new();
+        let mut gases = ClientGases::new();
 
         while let Some(event) = pre_events.pop_event() {
             mods.on_event(&event)?;
             blocks.on_event(&event, &mut pre_events, &mut networking)?;
             walls.on_event(&event)?;
+            gases.on_event(&event)?;
             items.on_event(&event, &mut entities.get_entities(), &mut pre_events)?;
         }
 
         blocks.init(&items.get_items_arc(), &mut mods.mod_manager)?;
         walls.init(&mut mods.mod_manager)?;
+        gases.init(&mut mods.mod_manager)?;
         items.init(&mut mods.mod_manager, &entities.get_entities_arc())?;
 
         "Initializing mods".clone_into(&mut loading_text2.lock().unwrap_or_else(PoisonError::into_inner));
         mods.init()?;
 
-        anyhow::Ok((mods, blocks, walls, entities, items, networking))
+        anyhow::Ok((mods, blocks, walls, entities, items, gases, networking))
     };
     // if the init fails, we clear the loading text so the error can be displayed
     let result = temp_fn()?;
@@ -93,7 +101,8 @@ pub fn run_game(
     let mut walls = result.2;
     let entities = result.3;
     let mut items = result.4;
-    let mut networking = result.5;
+    let mut networking = result.6;
+    let mut gases = result.5;
 
     let mut background = Background::new();
     let mut inventory = ClientInventory::new();
@@ -104,6 +113,7 @@ pub fn run_game(
     let mut block_selector = BlockSelector::new();
     let mut pause_menu = PauseMenu::new(graphics, settings.clone(), global_settings.clone());
     let mut debug_menu = DebugMenu::new();
+    let mut gas_overlay = Overlay::new(debug);
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -123,6 +133,7 @@ pub fn run_game(
 
     pause_menu.init(graphics);
     debug_menu.init();
+    gas_overlay.init(graphics, &GasOverlayProvider::new(&gases));
     chat.init(graphics);
     respawn_screen.init(graphics);
 
@@ -165,6 +176,10 @@ pub fn run_game(
         background.render(graphics, &camera);
         walls.render(graphics, &camera, &frame_timer)?;
         blocks.render(graphics, &camera /*&frame_timer*/)?;
+        // Draw the gas overlay immediately after the terrain (background/walls/
+        // blocks) but before players/items/HUD, so its gray wash only desaturates
+        // the world and the gas cells remain the focus while entities stay readable.
+        gas_overlay.render(graphics, &camera, &GasOverlayProvider::new(&gases))?;
         players.render(graphics, &mut entities.get_entities(), &camera);
         items.render(graphics, &camera, &mut entities.get_entities())?;
         floating_text.render(graphics, &camera);
@@ -173,6 +188,9 @@ pub fn run_game(
         block_selector.render(graphics, &mut networking, &camera)?;
         inventory.render(graphics, &items, &mut networking, &blocks.get_blocks())?;
         health.render(graphics);
+        // The gas overlay's toggle icon is HUD and must render on top of the world
+        // (the gray wash + gas cells themselves rendered much earlier).
+        gas_overlay.render_hud(graphics, &GasOverlayProvider::new(&gases));
         chat.render(graphics);
         respawn_screen.render(graphics);
 
@@ -191,10 +209,20 @@ pub fn run_game(
             if chat.on_event(&event, graphics, &mut networking)? {
                 continue;
             }
+            // The gas overlay's on-screen toggle icon consumes mouse press/release
+            // events that land on it, so they must not also reach the world
+            // handlers below (block_selector would mine the block under the cursor,
+            // and an off-world corner click would crash the server on an
+            // out-of-bounds coordinate). Run it before the world handlers and skip
+            // them entirely when it consumes the event.
+            if gas_overlay.on_event(&event, graphics)? {
+                continue;
+            }
             inventory.on_event(&event, &mut networking, &items, &mut blocks.get_blocks(), &mut events)?;
             mods.on_event(&event)?;
             blocks.on_event(&event, &mut events, &mut networking)?;
             walls.on_event(&event)?;
+            gases.on_event(&event)?;
             entities.on_event(&event, &mut events, &players, &mut networking)?;
             items.on_event(&event, &mut entities.get_entities(), &mut events)?;
             block_selector.on_event(graphics, &mut networking, &camera, &event, &mut events)?;
@@ -208,6 +236,11 @@ pub fn run_game(
             debug_menu.on_event(&event);
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
+
+        // Keep the server's live gas snapshots in sync with the overlay's
+        // visibility (G hotkey toggles don't consume the click event, so this is
+        // reconciled every frame rather than only on the toggle's own path).
+        gases.request_live_updates(gas_overlay.is_open(), &mut networking)?;
 
         framerate_measurer.update_post_render();
 

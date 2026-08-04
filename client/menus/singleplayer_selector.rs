@@ -250,6 +250,7 @@ pub struct SingleplayerSelector {
     top_rect_visibility: f32,
     settings: Rc<RefCell<Settings>>,
     global_settings: Rc<RefCell<GlobalSettings>>,
+    debug: bool,
     new_world_press: Rc<RefCell<bool>>,
     world_button_press: Rc<RefCell<Option<(usize, usize)>>>,
     close_self: bool,
@@ -258,7 +259,7 @@ pub struct SingleplayerSelector {
 
 impl SingleplayerSelector {
     #[must_use]
-    pub fn new(graphics: &gfx::GraphicsContext, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>) -> Self {
+    pub fn new(graphics: &gfx::GraphicsContext, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>, debug: bool) -> Self {
         let world_button_press = Rc::new(RefCell::new(None));
         let world_list = WorldList::new(graphics, &world_button_press);
         let mut title = gfx::Sprite::new();
@@ -314,6 +315,7 @@ impl SingleplayerSelector {
             top_rect_visibility: 0.0,
             settings,
             global_settings,
+            debug,
             new_world_press,
             world_button_press,
             close_self: false,
@@ -329,7 +331,7 @@ impl SingleplayerSelector {
             menu_back.render_back(graphics);
             {
                 let world = self.world_list.worlds.get(world)?;
-                if let Ok(menu) = PrivateWorld::new(world.get_file_path(), 0, world.name.clone(), self.settings.clone(), self.global_settings.clone()) {
+                if let Ok(menu) = PrivateWorld::new(world.get_file_path(), 0, world.name.clone(), self.settings.clone(), self.global_settings.clone(), self.debug) {
                     self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
                 }
             }
@@ -398,7 +400,7 @@ impl UiElement for SingleplayerSelector {
             for world in &self.world_list.worlds {
                 names_vec.push(world.name.clone());
             }
-            if let Ok(world_creation_menu) = WorldCreationMenu::new(graphics, names_vec, self.settings.clone(), self.global_settings.clone()) {
+            if let Ok(world_creation_menu) = WorldCreationMenu::new(graphics, names_vec, self.settings.clone(), self.global_settings.clone(), self.debug) {
                 self.open_menu = Some((Box::new(world_creation_menu), "CreateWorld".to_owned()));
             }
         }

@@ -5,6 +5,7 @@ mod chat;
 mod commands;
 mod core_server;
 mod entities;
+mod gases;
 mod items;
 mod mod_manager;
 mod networking;

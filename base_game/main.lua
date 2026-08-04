@@ -16,6 +16,7 @@ VERSION = "1.0"
 -- This function is called when the mod is loaded.
 function init()
     register_tools()
+    register_gases()
     register_blocks()
     register_walls()
     register_items()
