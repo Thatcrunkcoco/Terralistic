@@ -11,8 +11,9 @@ use crate::client::game::debug_menu::DebugMenu;
 use crate::client::game::entities::ClientEntities;
 use crate::client::game::floating_text::FloatingTextManager;
 use crate::client::game::framerate_measurer::FramerateMeasurer;
-use crate::client::game::gas_debug_overlay::GasDebugOverlay;
+use crate::client::game::gas_overlay::GasOverlayProvider;
 use crate::client::game::gases::ClientGases;
+use crate::client::game::overlay::Overlay;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
 use crate::client::game::items::ClientItems;
@@ -112,7 +113,7 @@ pub fn run_game(
     let mut block_selector = BlockSelector::new();
     let mut pause_menu = PauseMenu::new(graphics, settings.clone(), global_settings.clone());
     let mut debug_menu = DebugMenu::new();
-    let mut gas_debug_overlay = GasDebugOverlay::new(debug);
+    let mut gas_overlay = Overlay::new(debug);
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -132,7 +133,7 @@ pub fn run_game(
 
     pause_menu.init(graphics);
     debug_menu.init();
-    gas_debug_overlay.init(graphics);
+    gas_overlay.init(graphics, &GasOverlayProvider::new(&gases));
     chat.init(graphics);
     respawn_screen.init(graphics);
 
@@ -178,7 +179,7 @@ pub fn run_game(
         // Draw the gas overlay immediately after the terrain (background/walls/
         // blocks) but before players/items/HUD, so its gray wash only desaturates
         // the world and the gas cells remain the focus while entities stay readable.
-        gas_debug_overlay.render(graphics, &gases, &camera)?;
+        gas_overlay.render(graphics, &camera, &GasOverlayProvider::new(&gases))?;
         players.render(graphics, &mut entities.get_entities(), &camera);
         items.render(graphics, &camera, &mut entities.get_entities())?;
         floating_text.render(graphics, &camera);
@@ -189,7 +190,7 @@ pub fn run_game(
         health.render(graphics);
         // The gas overlay's toggle icon is HUD and must render on top of the world
         // (the gray wash + gas cells themselves rendered much earlier).
-        gas_debug_overlay.render_hud(graphics);
+        gas_overlay.render_hud(graphics, &GasOverlayProvider::new(&gases));
         chat.render(graphics);
         respawn_screen.render(graphics);
 
@@ -214,7 +215,7 @@ pub fn run_game(
             // and an off-world corner click would crash the server on an
             // out-of-bounds coordinate). Run it before the world handlers and skip
             // them entirely when it consumes the event.
-            if gas_debug_overlay.on_event(&event, graphics, &mut gases, &mut networking)? {
+            if gas_overlay.on_event(&event, graphics)? {
                 continue;
             }
             inventory.on_event(&event, &mut networking, &items, &mut blocks.get_blocks(), &mut events)?;
@@ -235,6 +236,11 @@ pub fn run_game(
             debug_menu.on_event(&event);
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
+
+        // Keep the server's live gas snapshots in sync with the overlay's
+        // visibility (G hotkey toggles don't consume the click event, so this is
+        // reconciled every frame rather than only on the toggle's own path).
+        gases.request_live_updates(gas_overlay.is_open(), &mut networking)?;
 
         framerate_measurer.update_post_render();
 
