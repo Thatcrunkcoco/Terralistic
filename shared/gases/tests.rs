@@ -453,18 +453,26 @@ mod tests {
     fn heavier_gas_sinks() {
         let (light, heavy) = defaults();
         let mut world = GasTestWorld::new(1, 2, light, 100.0);
-        // top (y=0) is heavy, bottom (y=1) is light, equal pressure: heavy should sink
+        // top (y=0) is heavy, bottom (y=1) is light, both full: the unstable
+        // heavy-above / light-below ordering should swap so heavier sinks below.
         world.layer.set_cell(0, 0, GasCell::new(heavy, 100.0)).unwrap();
         world.layer.set_cell(0, 1, GasCell::new(light, 100.0)).unwrap();
         world.activate_all();
 
-        let before_bottom = world.p(0, 1);
         for _ in 0..20 {
             world.tick();
         }
-        // The heavy gas migrated down: bottom gained pressure, top lost it.
-        assert!(world.p(0, 1) > before_bottom, "bottom should gain, got {}", world.p(0, 1));
-        assert!(world.p(0, 0) < 100.0, "top should lose, got {}", world.p(0, 0));
+        // The buoyancy swap exchanges gas identities: the bottom is now heavy.
+        assert_eq!(
+            world.layer.get_cell(0, 1).unwrap().gas,
+            heavy,
+            "heavier gas should have sunk to the bottom"
+        );
+        assert_eq!(
+            world.layer.get_cell(0, 0).unwrap().gas,
+            light,
+            "lighter gas should have risen to the top"
+        );
     }
 
     #[test]
@@ -519,9 +527,9 @@ mod tests {
     seal_box(&mut map, 262, 267, 174, 179);
 
     // Seed each box with a single gas.
-    for x in 250..255 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(co2, 150.0)).unwrap(); } }
-    for x in 256..261 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(oxy, 145.0)).unwrap(); } }
-    for x in 262..267 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 120.0)).unwrap(); } }
+    for x in 250..255 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(co2, 100.0)).unwrap(); } }
+    for x in 256..261 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(oxy, 100.0)).unwrap(); } }
+    for x in 262..267 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 100.0)).unwrap(); } }
 
     let mut flow = flow;
     flow.activate_all(w, h);

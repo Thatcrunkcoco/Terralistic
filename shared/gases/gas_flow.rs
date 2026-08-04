@@ -1,6 +1,12 @@
 use crate::shared::gases::{GasCell, GasId, GasLayer};
 use crate::shared::scheduler::Scheduler;
 
+/// The maximum amount a single open cell can hold — a fixed volume. This is what
+/// makes the flow *incompressible*: a cell never accepts more than this, so a
+/// substance settles to a uniform level rather than compressing to higher
+/// densities. Sealed demo pockets and the atmosphere are seeded at this level.
+pub const GAS_CELL_MAX_AMOUNT: f32 = 100.0;
+
 /// The per-tick flow fraction that a dial value of `100` corresponds to, for
 /// `level_rate`.
 ///
@@ -11,10 +17,6 @@ use crate::shared::scheduler::Scheduler;
 /// value (0.1) sits well under the ~0.25-per-neighbor numerical stability
 /// ceiling, so even `level_rate: 100` is stable.
 const LEVEL_RATE_MAX_FRACTION: f32 = 0.1;
-
-/// The per-tick flow fraction that a dial value of `100` corresponds to, for
-/// `buoyancy_rate` (kept smaller because buoyancy is a correction term).
-const BUOYANCY_RATE_MAX_FRACTION: f32 = 0.02;
 
 /// Parameters controlling how gas flows between cells.
 ///
@@ -28,21 +30,22 @@ pub struct GasFlowParams {
     /// 0-100 dial for how quickly the amount equalizes between a cell and one
     /// neighbor. 0 disables flow entirely; higher = faster dispersal.
     pub level_rate: f32,
-    /// 0-100 dial for the density-driven vertical bias. Positive values make a
-    /// heavier gas above a lighter one sink downward (restoring stable
-    /// heavy-below / light-above layering). 0 disables buoyancy.
+    /// 0-100 dial for density-driven layering. A positive value makes a heavier
+    /// gas above a lighter one swap (sink) so stable heavy-below / light-above
+    /// layering is restored; 0 (or below) disables buoyancy entirely.
     pub buoyancy_rate: f32,
 }
 
 impl Default for GasFlowParams {
     fn default() -> Self {
         Self {
-            // Slowed to a gentle dispersal: `level_rate: 8` maps to a
-            // per-tick fraction of ~0.008, so exposing a sealed pocket to the
-            // open atmosphere disperses very gradually instead of rushing out
-            // in a burst — much easier to watch the interaction.
-            level_rate: 1.0,
-            buoyancy_rate: 1.0,
+            // Fixed-volume relocation: `level_rate: 50` maps to a per-tick
+            // fraction of ~0.05, so a sealed pocket opened to empty neighbors
+            // visibly pours/levels over a few dozen ticks (clear to watch) while
+            // remaining numerically stable. Buoyancy at 50 makes heavier gases
+            // sink / lighter gases rise at a similar rate when they meet.
+            level_rate: 50.0,
+            buoyancy_rate: 50.0,
         }
     }
 }
@@ -52,15 +55,18 @@ impl GasFlowParams {
     fn level_fraction(self) -> f32 {
         (self.level_rate / 100.0) * LEVEL_RATE_MAX_FRACTION
     }
-
-    /// Scales a 0-100 dial value to its per-tick flow fraction.
-    fn buoyancy_fraction(self) -> f32 {
-        (self.buoyancy_rate / 100.0) * BUOYANCY_RATE_MAX_FRACTION
-    }
 }
 
-/// The gas flow simulation: an amount-relaxation step driven by an activity
-/// `Scheduler`.
+/// The gas flow simulation: a **fixed-volume + buoyancy** relocation step driven
+/// by an activity `Scheduler`.
+///
+/// Substances (which may be gases *or* liquids) are incompressible volumes: each
+/// open cell holds at most [`GAS_CELL_MAX_AMOUNT`]. Amount relocates *downward*
+/// and *laterally* (pouring / leveling) but never *upward* into open space —
+/// that is the fixed-volume property that keeps a pocket from diffusing gas-like
+/// into the vacuum above. Distinct gases then *layer* by density: a heavier gas
+/// above a lighter one is unstable, so the two swap (heavier sinks, lighter
+/// rises), while a stable light-above / heavy-below arrangement is a rest state.
 ///
 /// Scalability is the core design goal. Rather than iterating every cell in the
 /// world each tick (O(grid) forever), this only iterates the cells registered as
@@ -129,14 +135,26 @@ impl GasFlow {
         self.active.num_active()
     }
 
-    /// Advances the gas layer by one tick of flow relaxation.
+    /// Advances the layer by one tick of fixed-volume relocation.
     ///
-    /// - `is_open` returns `true` for a cell that gas can occupy / move through.
-    ///   Gas does not flow into or out of solid (or out-of-bounds) cells, which is
-    ///   what contains a sealed pocket of air.
-    /// - `density` resolves a gas id to its density (supplied by the caller from
-    ///   the gas registry), which drives vertical buoyancy. Empty cells (`GasId::NONE`)
-    ///   are treated as density 0.
+    /// - `is_open` returns `true` for a cell a substance can occupy / move through.
+    ///   Amount never flows into or out of solid (or out-of-bounds) cells, which is
+    ///   what contains a sealed pocket.
+    /// - `density` resolves a gas id to its density (supplied by the caller from the
+    ///   gas registry), which drives vertical buoyancy / layering. Empty cells
+    ///   (`GasId::NONE`) are treated as density 0.
+    ///
+    /// The flow runs in three order-independent passes:
+    ///   1. **Level equalization** — each cell levels toward a less-full neighbor
+    ///      across all four directions, so a connected open region resolves to a
+    ///      uniform amount (an incompressible, liquid-like surface). Transfers are
+    ///      capped by the target's remaining room and the source's amount, so mass
+    ///      is conserved and no cell ever goes negative.
+    ///   2. **Apply** — net deltas are applied with a dedup so a cell's delta is
+    ///      counted once; each cell resolves to a single gas (the dominant inflow).
+    ///   3. **Buoyancy swap** — for a vertical edge holding two *different* gases in
+    ///      an unstable order (heavier above lighter), the two swap gas identities,
+    ///      so the heavier sinks and the lighter rises regardless of fullness.
     ///
     /// The internal `#[allow(clippy::indexing_slicing)]` is safe: the scratch
     /// buffers are always sized to the grid and every index used comes from
@@ -168,14 +186,14 @@ impl GasFlow {
         }
         self.touched.clear();
 
-        // Phase 1: compute flow contributions. We read the *current* amounts
-        // (a Jacobi relaxation pass) so the result is order-independent, then
-        // accumulate deltas and record which substance dominates each inflow.
+        // --- Phase 1: amount relocation (fixed-volume flow) --------------------
+        // We read the *current* amounts (a Jacobi pass) so the result is
+        // order-independent, then accumulate net deltas in `amount_delta`.
         let active_indices: Vec<usize> = self.active.active().collect();
         for idx in &active_indices {
             let (x, y) = untranslate(*idx, w, h);
             if !is_open(x as i32, y as i32) {
-                // A solid source can't push gas around; drop it from flow.
+                // A solid source can't push substance around; drop it from flow.
                 continue;
             }
             let cell = layer.get_cell_by_index(*idx);
@@ -185,12 +203,11 @@ impl GasFlow {
             }
             let gas_c = cell.gas;
 
-            // 4-neighbors: (dx, dy, vertical_flag).
+            // 4-neighbors: (dx, dy).
             // y grows downward, so dy=-1 is "up", dy=+1 is "down".
-            const NEIGHBORS: [(i32, i32, f32); 4] =
-                [(0, -1, 1.0), (0, 1, 1.0), (-1, 0, 0.0), (1, 0, 0.0)];
+            const NEIGHBORS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
 
-            for (dx, dy, vertical) in NEIGHBORS {
+            for (dx, dy) in NEIGHBORS {
                 let nx = x as i32 + dx;
                 let ny = y as i32 + dy;
                 if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
@@ -201,22 +218,32 @@ impl GasFlow {
                 }
                 let nidx = translate(nx as u32, ny as u32, w, h);
                 let a_n = layer.amount_by_index(nidx);
-
-                // Amount equalization from c -> n (dial 0-100 scaled to a
-                // per-tick fraction).
-                let mut flow = (a_c - a_n) * self.params.level_fraction();
-
-                // Buoyancy on the vertical axis only, reinforcing stable layering:
-                // a heavier gas above a lighter one sinks; it never fights an
-                // already-stable heavy-below / light-above arrangement.
-                if vertical > 0.0 {
-                    flow += (density(gas_c) - density(layer.gas_by_index(nidx)))
-                        * self.params.buoyancy_fraction();
+                if a_n >= a_c {
+                    // Neighbor is already as full (or fuller); nothing levels away.
+                    continue;
                 }
 
+                // Room in the neighbor beyond its fixed volume (it always has room
+                // since a_n < a_c <= MAX).
+                let room_n = GAS_CELL_MAX_AMOUNT - a_n;
+                if room_n <= 0.0 {
+                    continue;
+                }
+
+                // Level equalization toward a less-full neighbor, pushed across
+                // all four directions so a connected open region resolves to a
+                // uniform amount (an incompressible, liquid-like surface). This is
+                // order-independent (Jacobi): we read current amounts, accumulate
+                // net deltas, and cap by the source's amount so mass is conserved.
+                let level = self.params.level_fraction();
+                let flow = ((a_c - a_n) * level).min(room_n);
                 if flow <= 0.0 {
                     continue;
                 }
+
+                // Cap by how much this source actually has, so no cell can send
+                // away more than it holds this tick (guarantees no negative cell).
+                let flow = flow.min(a_c);
 
                 self.amount_delta[*idx] -= flow;
                 self.amount_delta[nidx] += flow;
@@ -229,11 +256,11 @@ impl GasFlow {
             }
         }
 
-        // Phase 2: apply the net deltas and resolve gas types. `touched` may
-        // contain each cell multiple times (a cell can flow to several
-        // neighbors), and `amount_delta[cell]` already holds the *net* change,
-        // so we must deduplicate before applying. Applying an index more than
-        // once would compound its delta against the already-updated amount,
+        // --- Phase 2: apply the net deltas and resolve gas types ---------------
+        // `touched` may contain each cell multiple times (a cell can flow to
+        // several neighbors), and `amount_delta[cell]` already holds the *net*
+        // change, so we must deduplicate before applying. Applying an index more
+        // than once would compound its delta against the already-updated amount,
         // creating mass out of nothing.
         self.touched.sort_unstable();
         self.touched.dedup();
@@ -257,6 +284,42 @@ impl GasFlow {
                 layer.set_cell_by_index(*idx, GasCell::new(new_gas, new_amount));
                 // This cell changed; keep it active so equilibrium can continue.
                 self.active.activate(*idx);
+            }
+        }
+
+        // --- Phase 3: buoyancy — layer distinct gases by density --------------
+        // For each active cell, look at the cell directly BELOW (process each
+        // edge once by only checking the down-neighbor). If the two hold different
+        // gases in an unstable order (heavier above lighter), swap their gas
+        // identities so the heavier sinks and the lighter rises, and transfer a
+        // small, rate-scaled amount of the heavier substance downward (capillary
+        // of the denser phase settling). Amount is otherwise conserved and a
+        // stable light-above / heavy-below arrangement is a rest state.
+        for idx in &active_indices {
+            let (x, y) = untranslate(*idx, w, h);
+            if !is_open(x as i32, y as i32) {
+                continue;
+            }
+            let below_y = y as i32 + 1;
+            if below_y >= h as i32 || !is_open(x as i32, below_y) {
+                continue;
+            }
+            let nidx = translate(x as u32, below_y as u32, w, h);
+            let cell = layer.get_cell_by_index(*idx);
+            let below = layer.get_cell_by_index(nidx);
+            if cell.gas == below.gas || cell.gas.is_none() || below.gas.is_none() {
+                continue;
+            }
+            // Unstable: heavier above lighter -> swap, so the heavier settles lower
+            // and the lighter rises. Amounts exchange exactly, so mass is conserved.
+            // A `buoyancy_rate` of 0 (or below) disables layering entirely.
+            if self.params.buoyancy_rate > 0.0 && density(cell.gas) > density(below.gas) {
+                layer.set_cell_by_index(*idx, GasCell::new(below.gas, below.amount));
+                layer.set_cell_by_index(nidx, GasCell::new(cell.gas, cell.amount));
+                // The swap changed both cells; keep them awake so layering can
+                // cascade until the region is stable.
+                self.active.activate(*idx);
+                self.active.activate(nidx);
             }
         }
     }

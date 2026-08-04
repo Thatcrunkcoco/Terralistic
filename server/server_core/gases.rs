@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::libraries::events::Event;
 use crate::server::server_core::networking::{DisconnectEvent, NewConnectionEvent, PacketFromClientEvent, SendTarget, ServerNetworking};
 use crate::shared::blocks::Blocks;
-use crate::shared::gases::{init_gases_mod_interface, ClientRequestGasDebugPacket, GasCell, GasFlow, GasId, GasLayer, GasLayerUpdatePacket, GasLayerWelcomePacket, Gases, GasType};
+use crate::shared::gases::{GAS_CELL_MAX_AMOUNT, init_gases_mod_interface, ClientRequestGasDebugPacket, GasCell, GasFlow, GasId, GasLayer, GasLayerUpdatePacket, GasLayerWelcomePacket, Gases, GasType};
 use crate::shared::mod_manager::ModManager;
 use crate::shared::packet::Packet;
 
@@ -139,33 +139,31 @@ impl ServerGases {
 
         // One box per non-atmosphere gas. Each 5x5 interior is filled with a
         // single gas so the overlay shows clean, comparable, distinctly-colored
-        // pockets against the air-filled world.
+        // pockets against the (air-filled) world.
         //
-        // Each pocket is seeded at a pressure ABOVE the ambient air (100.0) so
-        // that breaking the seal creates a real outward pressure gradient for
-        // the (slowed-down) `pressure_rate` to act on. Before this change every
-        // cell sat at equal pressure (100), so opening a box produced almost no
-        // horizontal dispersion and the pressure knob had nothing to push — the
-        // only visible motion was buoyancy. Now the gases escape slowly and
-        // visibly instead.
-        //
-        // Hydrogen is deliberately seeded with the *least* overpressure: it is
-        // far lighter than air (density 0.09 vs 1.2), so it should rise out the
-        // top as a gentle plume rather than blast sideways and wash out. CO2 is
-        // the heaviest and gets the most overpressure so it pushes out and sinks
-        // into the world below.
-        let boxes: [(i32, i32, GasId, f32); 3] = [
-            (250, 255, co2, 150.0),      // heavy: pushes out + sinks
-            (256, 261, oxygen, 145.0),   // ~air density: gentle outward
-            (262, 267, hydrogen, 120.0), // very light: rises out the top
+        // Each pocket is seeded as a FULL cell (`GAS_CELL_MAX_AMOUNT`, i.e. the
+        // fixed volume of one tile) of its gas. Under fixed-volume flow there is
+        // no over-pressure gradient to act on; breaking the seal instead lets the
+        // pocket *pour* (downward) and *level* (laterally) into the open air and
+        // separate by density. For a keep it simple:
+        //   - CO2 (heaviest) pours out and sinks below the air.
+        //   - oxygen (~air density) mixes / levels gently.
+        //   - hydrogen (lightest) is swapped upward by buoyancy and rises out the
+        //     top as a plume, since a lighter-and-below / heavier-above edge is
+        //     unstable and swaps.
+        let boxes: [(i32, i32, GasId); 3] = [
+            (250, 255, co2),
+            (256, 261, oxygen),
+            (262, 267, hydrogen),
         ];
-        for (x0, x1, gas, amount) in boxes {
+        let full_amount = GAS_CELL_MAX_AMOUNT;
+        for (x0, x1, gas) in boxes {
             if gas.is_none() {
                 continue;
             }
             for x in x0..x1 {
                 for y in 174..179 {
-                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, amount));
+                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, full_amount));
                     self.flow.activate(x as u32, y as u32, width, height);
                 }
             }
