@@ -37,12 +37,12 @@ pub struct GasFlowParams {
 impl Default for GasFlowParams {
     fn default() -> Self {
         Self {
-            // Slowed to a gentle dispersion: `pressure_rate: 20` maps to a
-            // per-tick fraction of ~0.02, so exposing a sealed pocket to the
-            // open atmosphere disperses gradually instead of rushing out in a
-            // single burst — much easier to watch the interaction.
-            pressure_rate: 20.0,
-            buoyancy_rate: 50.0,
+            // Slowed to a gentle dispersion: `pressure_rate: 8` maps to a
+            // per-tick fraction of ~0.008, so exposing a sealed pocket to the
+            // open atmosphere disperses very gradually instead of rushing out
+            // in a burst — much easier to watch the interaction.
+            pressure_rate: 1.0,
+            buoyancy_rate: 1.0,
         }
     }
 }

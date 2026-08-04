@@ -107,11 +107,12 @@ mod tests {
         let oxygen = GasId::from_raw(2);
         let hydrogen = GasId::from_raw(3);
         layer.create((512, 256), air, 100.0);
-        // a small gas room like seed_test_gases fills: one 5x5 box per gas
+        // a small gas room like seed_test_gases fills: one 5x5 box per gas,
+        // each over-pressured above the ambient air
         for y in 174..179 {
-            for x in 250..255 { layer.set_cell(x, y, GasCell::new(co2, 100.0)).unwrap(); }
-            for x in 256..261 { layer.set_cell(x, y, GasCell::new(oxygen, 100.0)).unwrap(); }
-            for x in 262..267 { layer.set_cell(x, y, GasCell::new(hydrogen, 100.0)).unwrap(); }
+            for x in 250..255 { layer.set_cell(x, y, GasCell::new(co2, 150.0)).unwrap(); }
+            for x in 256..261 { layer.set_cell(x, y, GasCell::new(oxygen, 145.0)).unwrap(); }
+            for x in 262..267 { layer.set_cell(x, y, GasCell::new(hydrogen, 120.0)).unwrap(); }
         }
         let bytes = layer.serialize().unwrap();
         let raw = bincode::serialize(&layer).unwrap();
@@ -518,9 +519,9 @@ mod tests {
     seal_box(&mut map, 262, 267, 174, 179);
 
     // Seed each box with a single gas.
-    for x in 250..255 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(co2, 100.0)).unwrap(); } }
-    for x in 256..261 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(oxy, 100.0)).unwrap(); } }
-    for x in 262..267 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 100.0)).unwrap(); } }
+    for x in 250..255 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(co2, 150.0)).unwrap(); } }
+    for x in 256..261 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(oxy, 145.0)).unwrap(); } }
+    for x in 262..267 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 120.0)).unwrap(); } }
 
     let mut flow = flow;
     flow.activate_all(w, h);

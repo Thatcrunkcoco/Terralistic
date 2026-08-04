@@ -140,18 +140,32 @@ impl ServerGases {
         // One box per non-atmosphere gas. Each 5x5 interior is filled with a
         // single gas so the overlay shows clean, comparable, distinctly-colored
         // pockets against the air-filled world.
-        let boxes: [(i32, i32, GasId); 3] = [
-            (250, 255, co2),
-            (256, 261, oxygen),
-            (262, 267, hydrogen),
+        //
+        // Each pocket is seeded at a pressure ABOVE the ambient air (100.0) so
+        // that breaking the seal creates a real outward pressure gradient for
+        // the (slowed-down) `pressure_rate` to act on. Before this change every
+        // cell sat at equal pressure (100), so opening a box produced almost no
+        // horizontal dispersion and the pressure knob had nothing to push — the
+        // only visible motion was buoyancy. Now the gases escape slowly and
+        // visibly instead.
+        //
+        // Hydrogen is deliberately seeded with the *least* overpressure: it is
+        // far lighter than air (density 0.09 vs 1.2), so it should rise out the
+        // top as a gentle plume rather than blast sideways and wash out. CO2 is
+        // the heaviest and gets the most overpressure so it pushes out and sinks
+        // into the world below.
+        let boxes: [(i32, i32, GasId, f32); 3] = [
+            (250, 255, co2, 150.0),      // heavy: pushes out + sinks
+            (256, 261, oxygen, 145.0),   // ~air density: gentle outward
+            (262, 267, hydrogen, 120.0), // very light: rises out the top
         ];
-        for (x0, x1, gas) in boxes {
+        for (x0, x1, gas, pressure) in boxes {
             if gas.is_none() {
                 continue;
             }
             for x in x0..x1 {
                 for y in 174..179 {
-                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, 100.0));
+                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, pressure));
                     self.flow.activate(x as u32, y as u32, width, height);
                 }
             }
