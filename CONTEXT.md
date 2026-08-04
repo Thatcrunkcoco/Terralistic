@@ -19,8 +19,12 @@ _Last updated: 2026-08-03 (gas / substance / overlay architecture session)_
     gas density ordering). `GAS_CELL_MAX_AMOUNT`=100 caps cell volume. Defaults level_rate 50 /
     buoyancy_rate 50. Buoyancy is now an unconditional swap gated by buoyancy_rate>0.
     `heavier_gas_sinks` reshaped to assert gas-identity layering. 82/82 tests pass.
-  - **Remaining:** add `air`-filler removal (presentation only — remove `is_atmosphere`/
-    legend air-skip in client), merge liquids as a second substance on the same layer
+  - **Step 3 (DONE):** removed client air-filler special-casing — dropped
+    `is_atmosphere()` and the legend air-skip so air renders like any other gas
+    (vacuum `GasId::NONE` draws nothing). Chose **minimal**: no per-gas opacity flag
+    yet; air keeps its explicit cyan color. (If air should read visually subdued later,
+    add a clean generic `opacity` field on `GasType` — not a name hack.)
+  - **Remaining:** merge liquids as a second substance on the same layer
     (no structural change needed — just register liquid gas types), and future ONI-grade
     renderer (deferred).
   - NOTE: legacy "pressure" wording still in some test function names/comments — cosmetic.
