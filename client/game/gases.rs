@@ -61,10 +61,12 @@ impl ClientGases {
     }
 
     /// Debug helper: logs the dimensions of the mirrored gas layer plus a count
-    /// of non-`air` cells, so we can see whether the test-room gases actually made
-    /// it to the client. Air is identified by the gas registered under the name
-    /// "air"; any cell that is empty (NONE) or a different gas counts as
-    /// "non-air", which is what the overlay is meant to highlight.
+    /// of non-`air` cells, so we can see whether the test-room gases actually
+    /// made it to the client. "Air" is identified by the gas registered under
+    /// that name; any cell that is empty (NONE) or a different gas counts as
+    /// "non-air". This is purely a diagnostic counter — air is no longer special
+    /// in the rendering/overlay sense, but it remains the most common demo gas,
+    /// so non-air counts are a handy signal for whether test pockets arrived.
     fn log_layer_stats(&self, source: &str) {
         let (w, h) = self.layer.get_size();
         let air_id = self
@@ -125,27 +127,23 @@ impl ClientGases {
     /// colors match [`Self::color_for_gas`] (name-based), so the legend and the
     /// cells always agree. Unknown gases fall back to a density-derived color.
     ///
-    /// The atmosphere ("air") is excluded: it fills the whole world, so it is
-    /// not a notable gas the player hunts for, and listing it in the key would
-    /// just add noise. Only non-atmosphere gases appear.
+    /// Every registered gas appears, including "air" — which, since the switch
+    /// to a fixed-volume/fixed-cell model, is just a regular gas rather than a
+    /// special world-filling atmosphere.
     pub fn gas_legend(&self) -> Result<Vec<(String, crate::libraries::graphics::Color)>> {
         let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let air_id = gases.get_gas_id_by_name("air");
         let mut legend = Vec::new();
         for id in gases.get_all_gas_type_ids() {
-            if Some(id) == air_id {
-                continue; // skip the atmosphere; it's not a highlighted gas
-            }
             let gas_type = gases.get_gas_type(id)?;
             legend.push((gas_type.name.clone(), Self::gas_color(&gas_type.name, gas_type.density)));
         }
         Ok(legend)
     }
 
-    /// Maps a gas type name to its fixed debug-overlay color. The four demo
-    /// gases get explicit, easy-to-distinguish colors (air is cyan, oxygen blue,
-    /// co2 green, hydrogen pink); anything unregistered falls back to a
-    /// density-based ramp so it still renders sensibly.
+    /// Maps a gas type name to its fixed overlay color. The demo gases get
+    /// explicit, easy-to-distinguish colors (air cyan, oxygen blue, co2 green,
+    /// hydrogen pink); anything unregistered falls back to a density-based ramp
+    /// so it still renders sensibly.
     fn gas_color(name: &str, density: f32) -> crate::libraries::graphics::Color {
         match name {
             "air" => crate::libraries::graphics::Color::new(0, 200, 215, 255),     // cyan
@@ -156,26 +154,10 @@ impl ClientGases {
         }
     }
 
-    /// Whether the given gas is the world's default breathable atmosphere
-    /// (registered as "air"). The overlay treats this specially: since air fills
-    /// virtually the entire world at uniform amount, rendering it the same as
-    /// notable gases would paint everything one flat color and drown out the
-    /// pockets we actually want to highlight. Air is instead rendered faint and
-    /// neutral so the world reads as gray and only non-air gases stand out.
-    #[must_use]
-    pub fn is_atmosphere(&self, gas: GasId) -> bool {
-        let air_id = self
-            .gases
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_gas_id_by_name("air");
-        air_id == Some(gas)
-    }
-
-    /// Maps a gas id to a display color for the debug overlay. Colors are fixed
-    /// per gas name (air/oxygen blue, co2 green, hydrogen pink); unknown gases
-    /// fall back to a density-based ramp so they still render sensibly.
-    /// Empty cells read as black.
+    /// Maps a gas id to its overlay display color. Colors are fixed per gas name
+    /// (air cyan, oxygen blue, co2 green, hydrogen pink); unknown gases fall
+    /// back to a density-based ramp so they still render sensibly. Empty cells
+    /// read as black.
     #[must_use]
     pub fn color_for_gas(&self, gas: GasId) -> crate::libraries::graphics::Color {
         if gas.is_none() {
