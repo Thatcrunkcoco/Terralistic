@@ -1,29 +1,61 @@
 use crate::shared::gases::{GasCell, GasId, GasLayer};
 use crate::shared::scheduler::Scheduler;
 
+/// The per-tick flow fraction that a dial value of `100` corresponds to, for
+/// `pressure_rate`.
+///
+/// Pressure equalization is inherently a tiny per-tick fraction of the pressure
+/// difference (each cell relaxes toward its neighbors a little at a time), so a
+/// raw 0..=1.0 knob would bury the useful range down near 0.01–0.08. Mapping
+/// 100 to this constant spreads that range across a friendly 0-100 dial. The
+/// value (0.1) sits well under the ~0.25-per-neighbor numerical stability
+/// ceiling, so even `pressure_rate: 100` is stable.
+const PRESSURE_RATE_MAX_FRACTION: f32 = 0.1;
+
+/// The per-tick flow fraction that a dial value of `100` corresponds to, for
+/// `buoyancy_rate` (kept smaller because buoyancy is a correction term).
+const BUOYANCY_RATE_MAX_FRACTION: f32 = 0.02;
+
 /// Parameters controlling how gas flows between cells.
 ///
-/// Both rates are unitless per-tick coefficients. A tick simulates one fixed
-/// timestep of fluid relaxation. Keeping these as plain, tunable values is what
-/// lets the debug-mode vacuum worlds let you *watch* behavior and tune it.
+/// Both rates are exposed as friendly **0-100 dials** (0 = disabled, 100 = the
+/// practical maximum for that axis) rather than raw per-tick fractions — that
+/// way the tunable range reads naturally ("dispersion at 5, buoyancy at 50")
+/// instead of chasing tiny decimals. Internally each dial is scaled back to a
+/// per-tick fraction via the `*_MAX_FRACTION` constants above.
 #[derive(Clone, Copy, Debug)]
 pub struct GasFlowParams {
-    /// Rate at which pressure equalizes between a cell and one neighbor
-    /// (0.0 = no equalization, 1.0 = instant). Must stay comfortably below 1.0
-    /// over all four neighbors combined for numerical stability.
+    /// 0-100 dial for how quickly pressure equalizes between a cell and one
+    /// neighbor. 0 disables flow entirely; higher = faster dispersion.
     pub pressure_rate: f32,
-    /// Strength of the density-driven vertical bias. Positive values make a
+    /// 0-100 dial for the density-driven vertical bias. Positive values make a
     /// heavier gas above a lighter one sink downward (restoring stable
-    /// heavy-below / light-above layering). 0.0 disables buoyancy.
+    /// heavy-below / light-above layering). 0 disables buoyancy.
     pub buoyancy_rate: f32,
 }
 
 impl Default for GasFlowParams {
     fn default() -> Self {
         Self {
-            pressure_rate: 0.08,
-            buoyancy_rate: 0.01,
+            // Slowed to a gentle dispersion: `pressure_rate: 20` maps to a
+            // per-tick fraction of ~0.02, so exposing a sealed pocket to the
+            // open atmosphere disperses gradually instead of rushing out in a
+            // single burst — much easier to watch the interaction.
+            pressure_rate: 20.0,
+            buoyancy_rate: 50.0,
         }
+    }
+}
+
+impl GasFlowParams {
+    /// Scales a 0-100 dial value to its per-tick flow fraction.
+    fn pressure_fraction(self) -> f32 {
+        (self.pressure_rate / 100.0) * PRESSURE_RATE_MAX_FRACTION
+    }
+
+    /// Scales a 0-100 dial value to its per-tick flow fraction.
+    fn buoyancy_fraction(self) -> f32 {
+        (self.buoyancy_rate / 100.0) * BUOYANCY_RATE_MAX_FRACTION
     }
 }
 
@@ -170,15 +202,16 @@ impl GasFlow {
                 let nidx = translate(nx as u32, ny as u32, w, h);
                 let p_n = layer.pressure_by_index(nidx);
 
-                // Pressure equalization from c -> n.
-                let mut flow = (p_c - p_n) * self.params.pressure_rate;
+                // Pressure equalization from c -> n (dial 0-100 scaled to a
+                // per-tick fraction).
+                let mut flow = (p_c - p_n) * self.params.pressure_fraction();
 
                 // Buoyancy on the vertical axis only, reinforcing stable layering:
                 // a heavier gas above a lighter one sinks; it never fights an
                 // already-stable heavy-below / light-above arrangement.
                 if vertical > 0.0 {
                     flow += (density(gas_c) - density(layer.gas_by_index(nidx)))
-                        * self.params.buoyancy_rate;
+                        * self.params.buoyancy_fraction();
                 }
 
                 if flow <= 0.0 {

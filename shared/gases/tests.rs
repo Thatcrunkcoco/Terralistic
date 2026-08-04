@@ -322,8 +322,8 @@ mod tests {
             let mut layer = GasLayer::new();
             layer.create((w, h), fill_gas, fill_pressure);
             let flow = GasFlow::with_params(GasFlowParams {
-                pressure_rate: 0.08,
-                buoyancy_rate: 0.02,
+                pressure_rate: 80.0,
+                buoyancy_rate: 100.0,
             });
             let map = OpenMap::new(w, h);
             Self { gases, layer, flow, map }
@@ -503,7 +503,7 @@ mod tests {
 
     let mut layer = GasLayer::new();
     layer.create((w, h), air, 100.0);
-    let flow = GasFlow::with_params(GasFlowParams { pressure_rate: 0.08, buoyancy_rate: 0.02 });
+    let flow = GasFlow::with_params(GasFlowParams { pressure_rate: 80.0, buoyancy_rate: 100.0 });
 
     // Build an OpenMap with the box walls solid (matching stone_box). The boxes
     // occupy interiors y in [174..179], with a shared 1-block wall between
