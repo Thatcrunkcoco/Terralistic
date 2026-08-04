@@ -135,12 +135,12 @@ impl ClientGases {
     }
 
     /// Maps a gas type name to its fixed debug-overlay color. The four demo
-    /// gases get explicit, easy-to-distinguish colors (air and oxygen both map
-    /// to blue, co2 to green, hydrogen to pink); anything unregistered falls back
-    /// to a density-based ramp so it still renders sensibly.
+    /// gases get explicit, easy-to-distinguish colors (air is cyan, oxygen blue,
+    /// co2 green, hydrogen pink); anything unregistered falls back to a
+    /// density-based ramp so it still renders sensibly.
     fn gas_color(name: &str, density: f32) -> crate::libraries::graphics::Color {
         match name {
-            "air" => crate::libraries::graphics::Color::new(30, 100, 255, 255),     // blue
+            "air" => crate::libraries::graphics::Color::new(0, 200, 215, 255),     // cyan
             "co2" => crate::libraries::graphics::Color::new(60, 200, 60, 255),      // green
             "oxygen" => crate::libraries::graphics::Color::new(30, 100, 255, 255),  // blue
             "hydrogen" => crate::libraries::graphics::Color::new(255, 100, 180, 255), // pink
