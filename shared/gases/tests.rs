@@ -109,7 +109,7 @@ mod tests {
         // a small gas room like seed_test_gases fills
         for y in 174..179 {
             let gas = if y < 176 { co2 } else if y < 178 { air } else { hydrogen };
-            for x in 498..503 {
+            for x in 332..337 {
                 layer.set_cell(x, y, GasCell::new(gas, 100.0)).unwrap();
             }
         }
@@ -121,9 +121,9 @@ mod tests {
         let mut decoded = GasLayer::new();
         decoded.deserialize(&bytes).unwrap();
         assert_eq!(decoded.get_size(), layer.get_size());
-        assert_eq!(decoded.get_cell(499, 175).unwrap().gas, co2);
-        assert_eq!(decoded.get_cell(499, 178).unwrap().gas, hydrogen);
-        assert_eq!(decoded.get_cell(500, 100).unwrap().gas, air);
+        assert_eq!(decoded.get_cell(333, 175).unwrap().gas, co2);
+        assert_eq!(decoded.get_cell(333, 178).unwrap().gas, hydrogen);
+        assert_eq!(decoded.get_cell(334, 100).unwrap().gas, air);
     }
 
     #[test]
@@ -486,8 +486,8 @@ mod tests {
     fn test_world_boxes_survive_flow_and_produce_diff() {
     // Reproduce the flat test world scenario: a 512x256 world filled with air
     // (raw 0) at pressure 100, containing two sealed 5x5 boxes. Room1 at
-    // x in [498..503] has co2(1)/air(0)/oxygen(2)/hydrogen(3); room2 at
-    // x in [463..468] is all hydrogen(3). Activate-all, run many flow ticks,
+    // x in [332..337] has co2(1)/air(0)/oxygen(2)/hydrogen(3); room2 at
+    // x in [297..302] is all hydrogen(3). Activate-all, run many flow ticks,
     // then check update_chunks still reports the box pockets as differing.
     let w = 512u32; let h = 256u32;
     let air = GasId::from_raw(0);
@@ -505,24 +505,24 @@ mod tests {
     let flow = GasFlow::with_params(GasFlowParams { pressure_rate: 0.08, buoyancy_rate: 0.02 });
 
     // Build an OpenMap with the box walls solid (matching stone_box). The boxes
-    // occupy interior x in [498..503]/[463..468], y in [174..179]; walls are the
+    // occupy interior x in [332..337]/[297..302], y in [174..179]; walls are the
     // ring just outside the interior.
     let mut map = OpenMap::new(w, h);
     let seal_box = |map: &mut OpenMap, x0: i32, x1: i32, y0: i32, y1: i32| {
         for x in (x0)..=(x1) { map.set_solid(x, y0 - 1); map.set_solid(x, y1); }
         for y in (y0)..=(y1) { map.set_solid(x0 - 1, y); map.set_solid(x1, y); }
     };
-    seal_box(&mut map, 498, 503, 174, 179);
-    seal_box(&mut map, 463, 468, 174, 179);
+    seal_box(&mut map, 332, 337, 174, 179);
+    seal_box(&mut map, 297, 302, 174, 179);
 
     // Seed room1
     for y in 174..179 {
         let gas = if y < 176 { co2 } else if y < 178 { air } else { hyd };
-        for x in 498..503 { layer.set_cell(x, y, GasCell::new(gas, 100.0)).unwrap(); }
+        for x in 332..337 { layer.set_cell(x, y, GasCell::new(gas, 100.0)).unwrap(); }
     }
-    for x in 500..502 { for y in 176..177 { layer.set_cell(x, y, GasCell::new(oxy, 150.0)).unwrap(); } }
+    for x in 334..336 { for y in 176..177 { layer.set_cell(x, y, GasCell::new(oxy, 150.0)).unwrap(); } }
     // Seed room2
-    for x in 463..468 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 100.0)).unwrap(); } }
+    for x in 297..302 { for y in 174..179 { layer.set_cell(x, y, GasCell::new(hyd, 100.0)).unwrap(); } }
 
     let mut flow = flow;
     flow.activate_all(w, h);
@@ -550,8 +550,8 @@ mod tests {
             Err(_) => "ERR".to_owned(),
         }
     };
-    eprintln!("status room1(500,174)={} room1(500,178)={} room2(465,174)={} room2(465,178)={}",
-        cell(500,174), cell(500,178), cell(465,174), cell(465,178));
+    eprintln!("status room1(334,174)={} room1(334,178)={} room2(299,174)={} room2(299,178)={}",
+        cell(334,174), cell(334,178), cell(299,174), cell(299,178));
     assert!(post_diff > 0, "boxes disappeared from diff after flow!");
     }
 }

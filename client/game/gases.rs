@@ -122,16 +122,30 @@ impl ClientGases {
     /// Returns the list of registered gas types with their overlay colors, in
     /// registration order. This drives the ONI-style legend shown next to the
     /// gas overlay so the player can map each color to a gas at a glance. The
-    /// colors match [`Self::color_for_gas`] (density-based), so the legend and
-    /// the cells always agree.
+    /// colors match [`Self::color_for_gas`] (name-based), so the legend and the
+    /// cells always agree. Unknown gases fall back to a density-derived color.
     pub fn gas_legend(&self) -> Result<Vec<(String, crate::libraries::graphics::Color)>> {
         let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut legend = Vec::new();
         for id in gases.get_all_gas_type_ids() {
             let gas_type = gases.get_gas_type(id)?;
-            legend.push((gas_type.name.clone(), Self::density_color(gas_type.density)));
+            legend.push((gas_type.name.clone(), Self::gas_color(&gas_type.name, gas_type.density)));
         }
         Ok(legend)
+    }
+
+    /// Maps a gas type name to its fixed debug-overlay color. The four demo
+    /// gases get explicit, easy-to-distinguish colors (air and oxygen both map
+    /// to blue, co2 to green, hydrogen to pink); anything unregistered falls back
+    /// to a density-based ramp so it still renders sensibly.
+    fn gas_color(name: &str, density: f32) -> crate::libraries::graphics::Color {
+        match name {
+            "air" => crate::libraries::graphics::Color::new(30, 100, 255, 255),     // blue
+            "co2" => crate::libraries::graphics::Color::new(60, 200, 60, 255),      // green
+            "oxygen" => crate::libraries::graphics::Color::new(30, 100, 255, 255),  // blue
+            "hydrogen" => crate::libraries::graphics::Color::new(255, 100, 180, 255), // pink
+            _ => Self::density_color(density),
+        }
     }
 
     /// Whether the given gas is the world's default breathable atmosphere
@@ -150,9 +164,10 @@ impl ClientGases {
         air_id == Some(gas)
     }
 
-    /// Maps a gas id to a display color for the debug overlay. Light gases (low
-    /// density) read as cool cyan/blue and heavy gases as warm red/orange, so
-    /// layering is intuitive at a glance. Unknown/empty gases read as magenta.
+    /// Maps a gas id to a display color for the debug overlay. Colors are fixed
+    /// per gas name (air/oxygen blue, co2 green, hydrogen pink); unknown gases
+    /// fall back to a density-based ramp so they still render sensibly.
+    /// Empty cells read as black.
     #[must_use]
     pub fn color_for_gas(&self, gas: GasId) -> crate::libraries::graphics::Color {
         if gas.is_none() {
@@ -161,7 +176,7 @@ impl ClientGases {
         let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let color = gases.get_gas_type(gas).map_or_else(
             |_| crate::libraries::graphics::Color::new(255, 0, 255, 255),
-            |t| Self::density_color(t.density),
+            |t| Self::gas_color(&t.name, t.density),
         );
         color
     }

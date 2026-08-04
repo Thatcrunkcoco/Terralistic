@@ -264,8 +264,11 @@ impl GasDebugOverlay {
                 // preserving a sense of "empty world" — while every other gas gets a
                 // vivid, near-full-brightness overlay so sealed pockets clearly pop.
                 let (r, g, b, a) = if gases.is_atmosphere(gas) {
-                    let faint = (90.0 * 0.45) as u8; // muted gray, just above the wash
-                    (faint, faint, faint, 90)
+                    // Air counts as "blue" in the color scheme, but filling every
+                    // cell with full-blue would wash out the colored pockets. So
+                    // render the atmosphere as a faint blue tint — it reads as
+                    // blue while staying subdued enough for other gases to pop.
+                    (14, 46, 115, 90)
                 } else {
                     let color = gases.color_for_gas(gas);
                     // Non-atmosphere gases render at full brightness so pockets are
