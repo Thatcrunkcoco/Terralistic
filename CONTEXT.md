@@ -24,9 +24,17 @@ _Last updated: 2026-08-03 (gas / substance / overlay architecture session)_
     (vacuum `GasId::NONE` draws nothing). Chose **minimal**: no per-gas opacity flag
     yet; air keeps its explicit cyan color. (If air should read visually subdued later,
     add a clean generic `opacity` field on `GasType` — not a name hack.)
-  - **Remaining:** merge liquids as a second substance on the same layer
-    (no structural change needed — just register liquid gas types), and future ONI-grade
-    renderer (deferred).
+  - **Step 4 (DONE):** merged liquids as a second substance on the **same** shared
+    cell layer/registry/flow — no structural change. Registered `water` (1000) &
+    `magma` (3200) as ordinary "gas types" in `base_game/gases.lua`; gave them
+    explicit overlay colors; built a sealed twin-box liquid demo in the test world
+    (breaking the shared wall shows magma sinking below water, breaking the floor
+    pools it on the grass). Added test `liquid_supports_gas_above_on_shared_layer`.
+    83/83 tests pass.
+  - **Remaining:** future ONI-grade renderer (deferred). Natural follow-ons (not yet
+    scoped): a per-substance `viscosity` field on `GasType` so liquids level/flow slower
+    than gases (clean generic mechanism), and plumbing/electrical/item-transport overlays
+    as new `OverlayProvider`s.
   - NOTE: legacy "pressure" wording still in some test function names/comments — cosmetic.
   - Full detail + scope gauge: `session_summaries/2026-08-03-gas-substance-vision.md`.
 
