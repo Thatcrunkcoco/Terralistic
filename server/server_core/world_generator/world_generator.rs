@@ -467,86 +467,39 @@ impl WorldGenerator {
             place_test_tree(&mut block_terrain, x, ground - 1, width, height_u as i32, wood, branch, leaves, canopy);
         }
 
-        // --- Gas demonstration room: a compact 5x5 sealed stone box. ---
-        // Interior spans x in [332..337], y in [174..179] (5 wide x 5 tall) and
-        // is intentionally solid (stone_block) so gases are contained. Matching
-        // cell coordinates live in `ServerGases::seed_test_gases`. Staircases on
-        // both sides step up and over the top so the player can peek in (the
-        // debug overlay renders straight through solid blocks). The room sits
-        // near the player spawn (x≈256) so gases are within easy walking
-        // distance instead of parked at the far right edge of the map.
+        // --- Gas demonstration containers: four sealed 5x5 stone boxes set in a
+        // single physically-connected row, one gas per box (air, co2, oxygen,
+        // hydrogen) so the player can break the thin shared walls between
+        // neighbors and watch the gases mix and re-layer by density. The whole
+        // structure is centered on the player spawn (x≈256) so it is instantly
+        // reachable. Each box has a floor (y=179) and ceiling (y=173); neighbors
+        // share a 1-block-thick stone wall, and the outer left/right ends are
+        // capped with a wall too. No staircases: the gas debug overlay renders
+        // straight through solid blocks, and breaking walls is what opens the
+        // containers. Matching cell coordinates live in `ServerGases::seed_test_gases`.
         //
-        // Box footprint (x in [323..345]) is cleared first so trees don't
-        // overlap it, then the walls, staircases, and interior are built.
-        for x in 323..345 {
-            for y in 170..181 {
+        // Box interiors, left→right: air  x[246..251], co2 x[252..257],
+        // oxygen x[258..263], hydrogen x[264..269]. Walls sit at x in
+        // [245, 251, 257, 263, 269] spanning y in [173..180].
+        //
+        // Structure footprint (x in [245..270]) is cleared first so trees
+        // don't overlap it, then floor, ceiling, walls, and interiors are built.
+        for y in 170..181 {
+            for x in 245..270 {
                 block_terrain[x as usize][y as usize] = air;
                 wall_terrain[x as usize][y as usize] = walls.clear;
             }
         }
-        // Left + right wall columns (1 block thick), floor at y=179, ceiling at y=173.
-        for x in [331, 337] {
-            for y in 173..180 {
-                tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
-            }
-        }
-        // Floor and ceiling slabs across the interior.
-        for x in 332..337 {
+        // Floor and ceiling slabs spanning the whole structure.
+        for x in 245..270 {
             tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
             tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
         }
-        // Left staircase ascending from ground up over the left wall.
-        for i in 0..8 {
-            let x = 323 + i;
-            let y = 179 - i;
-            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
-        }
-        // Right staircase descending from the right wall back down to ground.
-        for i in 0..7 {
-            let x = 338 + i;
-            let y = 173 + i;
-            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
-        }
-
-        // --- Second gas demonstration room: a sealed 5x5 box identical in size
-        // to the first, holding a *different* gas so the debug overlay can be
-        // compared across two self-contained pockets. Interior spans
-        // x in [297..302], y in [174..179] (5 wide x 5 tall), matching the first
-        // room. Matching cell coordinates live in `ServerGases::seed_test_gases`.
-        // Like the first room it sits near the player spawn (x≈256), with the
-        // two boxes side by side ~35 blocks apart.
-        //
-        // Box footprint (x in [288..310]) is cleared first so trees don't overlap
-        // it, then the walls, staircases, and interior are built exactly like the
-        // first box but shifted 35 blocks left.
-        for x in 288..310 {
-            for y in 170..181 {
-                block_terrain[x as usize][y as usize] = air;
-                wall_terrain[x as usize][y as usize] = walls.clear;
-            }
-        }
-        // Left + right wall columns (1 block thick), floor at y=179, ceiling at y=173.
-        for x in [296, 302] {
+        // Outer left/right caps and the three internal shared walls.
+        for wx in [245, 251, 257, 263, 269] {
             for y in 173..180 {
-                tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
+                tset(&mut block_terrain, wx, y, width, height_u as i32, stone_block);
             }
-        }
-        // Floor and ceiling slabs across the interior.
-        for x in 297..302 {
-            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
-            tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
-        }
-        // Left staircase ascending from ground up over the left wall.
-        for i in 0..8 {
-            let x = 288 + i;
-            let y = 179 - i;
-            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
-        }
-        // Right staircase descending from the right wall back down to ground.
-        for i in 0..7 {
-            let x = 303 + i;
-            let y = 173 + i;
-            tset(&mut block_terrain, x, y, width, height_u as i32, stone_block);
         }
 
         blocks.create_from_block_ids(&block_terrain)?;

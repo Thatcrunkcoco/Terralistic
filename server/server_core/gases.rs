@@ -115,13 +115,13 @@ impl ServerGases {
         }
     }
 
-    /// Seeds the sealed gas demonstration room in the "test" world with the
-    /// declared gas types so the debug overlay has layered content to visualize.
-    /// The room interior is x in [332..337], y in [174..179] (5x5, matching the
-    /// compact stone box built in `WorldGenerator::generate_test`). With only
-    /// five rows we use relative bands (top heavy, middle air, bottom light) and
-    /// deliberately invert them so the flow re-layers them by density. Like the
-    /// generator, these coordinates sit near the player spawn (x≈256).
+    /// Seeds the four gas demonstration boxes in the "test" world — one sealed
+    /// 5x5 container per gas (air, co2, oxygen, hydrogen) — so the debug overlay
+    /// has a distinct pocket for each. The boxes sit side by side in a connected
+    /// row (matching `WorldGenerator::generate_test`), so breaking the thin
+    /// shared walls between neighbors lets the gases mix and re-layer by density.
+    /// Interiors (left→right): air x[246..251], co2 x[252..257], oxygen
+    /// x[258..263], hydrogen x[264..269], all y in [174..179].
     pub fn seed_test_gases(&mut self) {
         let (width, height) = self.layer.get_size();
         if width == 0 || height == 0 {
@@ -136,81 +136,40 @@ impl ServerGases {
         let co2 = id_of("co2").unwrap_or(GasId::NONE);
         let oxygen = id_of("oxygen").unwrap_or(GasId::NONE);
 
-        const X0: i32 = 332;
-        const X1: i32 = 337;
-        const Y0: i32 = 174;
-        const Y1: i32 = 179;
-
-        for y in Y0..Y1 {
-            // Top band: carbon dioxide (heavy) — will settle to the bottom.
-            let gas = if y < Y0 + 2 {
-                co2
-            } else if y < Y1 - 1 {
-                // middle band: air
-                air
-            } else {
-                // bottom band: hydrogen (light) — will float to the top
-                hydrogen
-            };
+        // One box per gas, in world order. Each 5x5 interior is filled with a
+        // single gas so the overlay shows four clean, comparable pockets.
+        let boxes: [(i32, i32, GasId); 4] = [
+            (246, 251, air),
+            (252, 257, co2),
+            (258, 263, oxygen),
+            (264, 269, hydrogen),
+        ];
+        for (x0, x1, gas) in boxes {
             if gas.is_none() {
                 continue;
             }
-            for x in X0..X1 {
-                let _ = self.layer.set_cell(x, y, GasCell::new(gas, 100.0));
-                self.flow.activate(x as u32, y as u32, width, height);
-            }
-        }
-        // a small pocket of pure oxygen near the center for contrast
-        if !oxygen.is_none() {
-            for x in 334..336 {
-                for y in 176..177 {
-                    let _ = self.layer.set_cell(x, y, GasCell::new(oxygen, 150.0));
-                    self.flow.activate(x as u32, y as u32, width, height);
-                }
-            }
-        }
-
-        // Second sealed demo room, x in [297..302], y in [174..179] (5x5),
-        // matching the box built in `WorldGenerator::generate_test`. This room
-        // is filled almost entirely with hydrogen so it renders as a distinct
-        // light single-colored pocket in the debug overlay, contrasting with
-        // the first room's co2/air/hydrogen mix.
-        if !hydrogen.is_none() {
-            for x in 297..302 {
+            for x in x0..x1 {
                 for y in 174..179 {
-                    let _ = self.layer.set_cell(x, y, GasCell::new(hydrogen, 100.0));
+                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, 100.0));
                     self.flow.activate(x as u32, y as u32, width, height);
                 }
             }
         }
 
-        // Debug instrumentation: dump the seeded box cells so we can confirm the
-        // layer actually holds the demo gases before any flow tick runs. Each log
-        // line is `gas.raw()` (or -2 for NONE) then pressure. Room 1 is the right
-        // box (x 332..337), room 2 the left box (x 297..302).
-        tracing::debug!(
-            "gas[seed] layer={}x{} — room1 interior:",
-            width,
-            height
-        );
-        for y in 174..179 {
-            let row: Vec<String> = (332..337)
-                .map(|x| match self.layer.get_cell(x, y) {
-                    Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
-                    Err(_) => "ERR".to_owned(),
-                })
-                .collect();
-            tracing::debug!("gas[seed]   room1 y={y}: {}", row.join(" "));
-        }
-        tracing::debug!("gas[seed] room2 interior:");
-        for y in 174..179 {
-            let row: Vec<String> = (297..302)
-                .map(|x| match self.layer.get_cell(x, y) {
-                    Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
-                    Err(_) => "ERR".to_owned(),
-                })
-                .collect();
-            tracing::debug!("gas[seed]   room2 y={y}: {}", row.join(" "));
+        // Debug instrumentation: dump each seeded box so we can confirm the layer
+        // holds the demo gas before any flow tick runs. Each line lists
+        // `gas.raw()` (or -2 for NONE) per row.
+        tracing::debug!("gas[seed] layer={}x{} — demo boxes:", width, height);
+        for (label, x0, x1) in [("air", 246, 251), ("co2", 252, 257), ("oxygen", 258, 263), ("hydrogen", 264, 269)] {
+            for y in 174..179 {
+                let row: Vec<String> = (x0..x1)
+                    .map(|x| match self.layer.get_cell(x, y) {
+                        Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
+                        Err(_) => "ERR".to_owned(),
+                    })
+                    .collect();
+                tracing::debug!("gas[seed]   {label} y={y}: {}", row.join(" "));
+            }
         }
     }
 
@@ -348,11 +307,11 @@ impl ServerGases {
                     }
                 };
                 tracing::debug!(
-                    "gas[status] room1(334,174)={} room1(334,178)={} room2(299,174)={} room2(299,178)={}",
-                    probe(334, 174),
-                    probe(334, 178),
-                    probe(299, 174),
-                    probe(299, 178),
+                    "gas[status] air(248,174)={} co2(254,174)={} oxygen(260,174)={} hydrogen(266,174)={}",
+                    probe(248, 174),
+                    probe(254, 174),
+                    probe(260, 174),
+                    probe(266, 174),
                 );
                 for chunk in chunks {
                     let packet = Packet::new(GasLayerUpdatePacket { chunk })?;
