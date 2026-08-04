@@ -140,16 +140,22 @@ impl ClientGases {
         Ok(legend)
     }
 
-    /// Maps a gas type name to its fixed overlay color. The demo gases get
+    /// Maps a gas type name to its fixed overlay color. The demo substances get
     /// explicit, easy-to-distinguish colors (air cyan, oxygen blue, co2 green,
-    /// hydrogen pink); anything unregistered falls back to a density-based ramp
-    /// so it still renders sensibly.
+    /// hydrogen pink, water deep-blue, magma orange); anything unregistered
+    /// falls back to a density-based ramp so it still renders sensibly.
+    ///
+    /// Liquids are registered as ordinary "gas types" on the same substance
+    /// layer, so they color through the exact same path as gases — no separate
+    /// liquid overlay/rendering needed. Their colors are just data here.
     fn gas_color(name: &str, density: f32) -> crate::libraries::graphics::Color {
         match name {
             "air" => crate::libraries::graphics::Color::new(0, 200, 215, 255),     // cyan
             "co2" => crate::libraries::graphics::Color::new(60, 200, 60, 255),      // green
             "oxygen" => crate::libraries::graphics::Color::new(30, 100, 255, 255),  // blue
             "hydrogen" => crate::libraries::graphics::Color::new(255, 100, 180, 255), // pink
+            "water" => crate::libraries::graphics::Color::new(20, 60, 220, 255),    // deep blue
+            "magma" => crate::libraries::graphics::Color::new(255, 120, 30, 255),  // orange
             _ => Self::density_color(density),
         }
     }

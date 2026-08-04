@@ -508,6 +508,44 @@ impl WorldGenerator {
             }
         }
 
+        // --- Liquid demonstration: two sealed stone tanks (water, magma) sitting
+        // on the ground just right of the gas boxes. Liquids are registered as
+        // ordinary "gas types" on the *same* substance cell layer as gases (see
+        // `base_game/gases.lua`), so no separate liquid system exists — they flow,
+        // level, and layer through the identical fixed-volume + buoyancy path.
+        //
+        // While sealed, water and magma are contained (fixed-volume flow never
+        // escapes a solid box). Breaking the shared interior wall lets the two
+        // liquids meet: magma (density 3200) is heavier than water (density 1000),
+        // so buoyancy swaps them into a clean magma-below / water-above layering.
+        // Breaking an outer wall or the floor pours the liquid out onto the flat
+        // grass surface (y=180), where it pools as a level, liquid-like puddle
+        // rather than rising/diffusing like a gas — an unmistakable visual that
+        // the unified layer handles both phases.
+        //
+        // Twin-box geometry mirrors the gas structure: interior volume y[174..179]
+        // (floor y=179 sitting one block above the grass at y=180), ceiling y=173,
+        // shared interior wall at x=279, outer caps at x=269 and x=289. Water
+        // interior x[270..278], magma interior x[280..288]. The footprint is
+        // cleared of trees first (x in [269..290], y in [170..181]).
+        for y in 170..181 {
+            for x in 269..290 {
+                block_terrain[x as usize][y as usize] = air;
+                wall_terrain[x as usize][y as usize] = walls.clear;
+            }
+        }
+        // Floor and ceiling slabs spanning the whole structure.
+        for x in 269..290 {
+            tset(&mut block_terrain, x, 173, width, height_u as i32, stone_block);
+            tset(&mut block_terrain, x, 179, width, height_u as i32, stone_block);
+        }
+        // Outer caps and the single internal shared wall.
+        for wx in [269, 279, 289] {
+            for y in 173..180 {
+                tset(&mut block_terrain, wx, y, width, height_u as i32, stone_block);
+            }
+        }
+
         blocks.create_from_block_ids(&block_terrain)?;
         walls.create_from_wall_ids(&wall_terrain)?;
 

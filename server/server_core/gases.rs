@@ -115,15 +115,20 @@ impl ServerGases {
         }
     }
 
-    /// Seeds the gas demonstration boxes in the "test" world — one sealed 5x5
-    /// container per notable gas (co2, oxygen, hydrogen). The boxes sit side by
-    /// side in a connected row (matching `WorldGenerator::generate_test`), so
-    /// breaking the thin shared walls between neighbors lets the gases mix and
-    /// re-layer by density. Air needs no container: it is the world's ambient
-    /// atmosphere, so every open cell is already air and a dedicated box would
-    /// render identically to (and be invisible against) the surrounding world.
-    /// Interiors (left→right): co2 x[250..255], oxygen x[256..261], hydrogen
-    /// x[262..267], all y in [174..179].
+    /// Seeds the substance demonstration containers in the "test" world — one
+    /// sealed 5x5 box per notable gas (co2, oxygen, hydrogen) in a connected
+    /// row, plus a sealed twin-box liquid tank (water, magma) sitting on the
+    /// ground just to the right (matching `WorldGenerator::generate_test`).
+    ///
+    /// Breaking the thin shared walls between gas boxes lets them mix and
+    /// re-layer by density; breaking the shared wall between water and magma
+    /// lets the two liquids meet and settle into magma-below / water-above.
+    /// Air needs no container: it is the world's ambient atmosphere, so every
+    /// open cell is already air.
+    ///
+    /// Gas interiors (left→right): co2 x[250..255], oxygen x[256..261],
+    /// hydrogen x[262..267], all y in [174..179]. Liquid interiors: water
+    /// x[270..278], magma x[280..288], both y in [174..179].
     pub fn seed_test_gases(&mut self) {
         let (width, height) = self.layer.get_size();
         if width == 0 || height == 0 {
@@ -136,25 +141,26 @@ impl ServerGases {
         let hydrogen = id_of("hydrogen").unwrap_or(GasId::NONE);
         let co2 = id_of("co2").unwrap_or(GasId::NONE);
         let oxygen = id_of("oxygen").unwrap_or(GasId::NONE);
+        let water = id_of("water").unwrap_or(GasId::NONE);
+        let magma = id_of("magma").unwrap_or(GasId::NONE);
 
-        // One box per non-atmosphere gas. Each 5x5 interior is filled with a
-        // single gas so the overlay shows clean, comparable, distinctly-colored
-        // pockets against the (air-filled) world.
-        //
-        // Each pocket is seeded as a FULL cell (`GAS_CELL_MAX_AMOUNT`, i.e. the
-        // fixed volume of one tile) of its gas. Under fixed-volume flow there is
+        // Each pocket is seeded as a FULL cell (`GAS_CELL_MAX_AMOUNT`, the fixed
+        // volume of one tile) of its substance. Under fixed-volume flow there is
         // no over-pressure gradient to act on; breaking the seal instead lets the
-        // pocket *pour* (downward) and *level* (laterally) into the open air and
-        // separate by density. For a keep it simple:
-        //   - CO2 (heaviest) pours out and sinks below the air.
+        // substance *pour* (downward) and *level* (laterally) and separate by
+        // density. Gas behavior:
+        //   - CO2 (heaviest gas) pours out and sinks below the air.
         //   - oxygen (~air density) mixes / levels gently.
-        //   - hydrogen (lightest) is swapped upward by buoyancy and rises out the
-        //     top as a plume, since a lighter-and-below / heavier-above edge is
-        //     unstable and swaps.
-        let boxes: [(i32, i32, GasId); 3] = [
+        //   - hydrogen (lightest) is swapped upward by buoyancy and rises as a
+        //     plume, since lighter-below / heavier-above is unstable and swaps.
+        // Liquids are far denser, so they sink to the bottom of their tanks and
+        // pool; magma (3200) settles below water (1000) when they meet.
+        let boxes: [(i32, i32, GasId); 5] = [
             (250, 255, co2),
             (256, 261, oxygen),
             (262, 267, hydrogen),
+            (270, 278, water),
+            (280, 288, magma),
         ];
         let full_amount = GAS_CELL_MAX_AMOUNT;
         for (x0, x1, gas) in boxes {
@@ -170,10 +176,16 @@ impl ServerGases {
         }
 
         // Debug instrumentation: dump each seeded box so we can confirm the layer
-        // holds the demo gas before any flow tick runs. Each line lists
+        // holds the demo substance before any flow tick runs. Each line lists
         // `gas.raw()` (or -2 for NONE) per row.
         tracing::debug!("gas[seed] layer={}x{} — demo boxes:", width, height);
-        for (label, x0, x1) in [("co2", 250, 255), ("oxygen", 256, 261), ("hydrogen", 262, 267)] {
+        for (label, x0, x1) in [
+            ("co2", 250, 255),
+            ("oxygen", 256, 261),
+            ("hydrogen", 262, 267),
+            ("water", 270, 278),
+            ("magma", 280, 288),
+        ] {
             for y in 174..179 {
                 let row: Vec<String> = (x0..x1)
                     .map(|x| match self.layer.get_cell(x, y) {

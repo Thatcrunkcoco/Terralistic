@@ -493,6 +493,46 @@ mod tests {
     }
 
     #[test]
+    fn liquid_supports_gas_above_on_shared_layer() {
+        // Liquids are just very-dense substances on the *same* cell layer as
+        // gases (step 4 unification). Here the bottom two cells hold a "water"
+        // liquid (density 1000) and the top cell holds air (density 1.2), all at
+        // full capacity, in the *stable* heavy-below / light-above order. This
+        // must be a rest state: a pool of liquid holding a gas column above it
+        // should not churn or swap.
+        let mut gases = Gases::new();
+        let air = gases.register_new_gas_type(GasType::new("air".to_owned(), 1.2)).unwrap();
+        let water = gases.register_new_gas_type(GasType::new("water".to_owned(), 1000.0)).unwrap();
+
+        let mut layer = GasLayer::new();
+        let mut flow = GasFlow::with_params(GasFlowParams { level_rate: 80.0, buoyancy_rate: 100.0 });
+        let map = OpenMap::new(1, 3);
+        layer.create((1, 3), air, 100.0);
+        // bottom two cells are the liquid, top is the gas (stable: heavy below).
+        layer.set_cell(0, 1, GasCell::new(water, 100.0)).unwrap();
+        layer.set_cell(0, 2, GasCell::new(water, 100.0)).unwrap();
+        layer.set_cell(0, 0, GasCell::new(air, 100.0)).unwrap();
+        flow.activate_all(1, 3);
+
+        let is_open = |x: i32, y: i32| map.is_open(x, y);
+        let density = move |g: GasId| {
+            if g.is_none() {
+                0.0
+            } else {
+                gases.get_gas_type(g).map(|t| t.density).unwrap_or(0.0)
+            }
+        };
+        for _ in 0..200 {
+            flow.tick(&mut layer, &is_open, &density);
+        }
+
+        // The liquid stayed pooled at the bottom, gas column intact above it.
+        assert_eq!(layer.get_cell(0, 2).unwrap().gas, water, "liquid should pool at the very bottom");
+        assert_eq!(layer.get_cell(0, 1).unwrap().gas, water, "liquid should fill the lower body");
+        assert_eq!(layer.get_cell(0, 0).unwrap().gas, air, "gas should remain above the liquid");
+    }
+
+    #[test]
     fn test_world_boxes_survive_flow_and_produce_diff() {
     // Reproduce the flat test world scenario: a 512x256 world filled with air
     // (raw 0) at pressure 100, containing three sealed 5x5 boxes in a row, one

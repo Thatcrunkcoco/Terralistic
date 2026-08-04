@@ -1,15 +1,26 @@
 --[[
-Gas type declarations for the base game.
+Substance type declarations for the base game.
 
-Each gas declares a unique name and a density. Density drives vertical layering
-during flow: heavier gases sink, lighter gases rise. The "air" gas is the default
-atmosphere the world is seeded with.
+Every substance — gas *or* liquid — is a single registered "gas type" on the
+same shared substance cell layer. A substance declares a unique name and a
+density; density drives vertical layering during flow. The layer, registry, and
+flow simulation treat gases and liquids identically: a liquid is just a
+substance heavy enough to sink below the air and pool on solid floors, rather
+than a wholly separate simulation system.
+
+Gases are lighter and spread/rise; liquids are much denser and settle low.
 ]]--
 
 gases = {}
 
 function register_gases()
-    terralistic_print("registering gases...")
+    terralistic_print("registering substances (gases + liquids)...")
+
+    -- Liquids are far denser than any gas, so they sink to the bottom of a
+    -- shared pocket and pool on solid floors while lighter gases stay above.
+    gases.water = terralistic_register_gas_type("water", 1000.0)
+    -- A second liquid for contrast; heavier than water so it settles beneath it.
+    gases.magma = terralistic_register_gas_type("magma", 3200.0)
 
     -- Default breathable atmosphere.
     gases.air = terralistic_register_gas_type("air", 1.2)
