@@ -58,6 +58,31 @@ impl ServerGases {
         init_gases_mod_interface(mods, &self.gases)
     }
 
+    /// Serializes the current gas layer for persistence (written into the world
+    /// save file). Mirrors how blocks/walls/players are persisted so the actual
+    /// gas state — including any sealed demo pockets and flow-driven layering —
+    /// survives a save/reload session instead of being lost and re-seeded.
+    pub fn serialize_layer(&self) -> Result<Vec<u8>> {
+        self.layer.serialize()
+    }
+
+    /// Restores the gas layer from a previously-saved world file. Returns `Ok`
+    /// if the blob was a valid gas layer, `Err` if it was missing/corrupt (the
+    /// caller then falls back to a fresh air layer).
+    ///
+    /// The flow simulation's activity scheduler is a pure runtime structure and
+    /// is *not* persisted with the layer, so it starts empty on every load. We
+    /// therefore (re)activate the whole grid here so the restored atmosphere
+    /// participates in flow again and responds to perturbations (e.g. a player
+    /// breaking a block). Without this the restored cells would be frozen and
+    /// gas would never move or disperse.
+    pub fn deserialize_layer(&mut self, serial: &[u8]) -> Result<()> {
+        self.layer.deserialize(serial)?;
+        let (w, h) = self.layer.get_size();
+        self.flow.activate_all(w, h);
+        Ok(())
+    }
+
     /// Rebuilds the gas layer to match the world and fills it with the default
     /// "air" gas. Call after world generation/load, when gas types are registered.
     pub fn initialize_world(&mut self, blocks: &Blocks) {

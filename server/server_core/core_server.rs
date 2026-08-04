@@ -197,11 +197,16 @@ impl Server {
 
         self.commands.init(&mut self.mods.mod_manager);
 
+        // Whether the gas layer was restored from a previous save. When true we
+        // must NOT re-initialize the layer (that would wipe the saved pockets),
+        // which is what previously broke gas highlighting on save/reload.
+        let mut gas_restored = false;
+
         if world_path.exists() {
             self.set_state(ServerState::LoadingWorld);
             print_to_console("loading world", 0);
             "Loading world".clone_into(&mut status_text.lock().unwrap_or_else(PoisonError::into_inner));
-            self.load_world(world_path)?;
+            gas_restored = self.load_world(world_path)?;
         } else {
             self.set_state(ServerState::GeneratingWorld);
 
@@ -238,21 +243,30 @@ impl Server {
             }
         }
 
-        // Size the gas layer to the generated/loaded world and seed it with air.
-        self.gases.initialize_world(&self.blocks.get_blocks());
+        // If the save already carried a gas layer, keep it as-is so the demo
+        // pockets (and any flow changes) survive the reload. Otherwise the layer
+        // was freshly generated (or is an old save), so size it to the world,
+        // fill it with air, and — for the reserved flat test world — seed the
+        // sealed demo rooms the debug overlay visualizes.
+        if !gas_restored {
+            // Size the gas layer to the generated/loaded world and seed it with air.
+            self.gases.initialize_world(&self.blocks.get_blocks());
 
-        // Seed the sealed gas demo room (only present in the flat test world) so
-        // the debug overlay has layered gases to visualize. Log whether the seed
-        // actually applied so we can immediately tell if a session is on the
-        // reserved flat test world (name "test", seed 123).
-        if self.world_name == "test" && self.world_seed == 123 {
-            self.gases.seed_test_gases();
-            tracing::debug!("gas: seeded demo gas rooms (world '{}' seed {})", self.world_name, self.world_seed);
+            // Seed the sealed gas demo room (only present in the flat test world) so
+            // the debug overlay has layered gases to visualize. Log whether the seed
+            // actually applied so we can immediately tell if a session is on the
+            // reserved flat test world (name "test", seed 123).
+            if self.world_name == "test" && self.world_seed == 123 {
+                self.gases.seed_test_gases();
+                tracing::debug!("gas: seeded demo gas rooms (world '{}' seed {})", self.world_name, self.world_seed);
+            } else {
+                tracing::debug!(
+                    "gas: NOT seeding demo rooms — world '{}' seed {} is not the reserved test world",
+                    self.world_name, self.world_seed
+                );
+            }
         } else {
-            tracing::debug!(
-                "gas: NOT seeding demo rooms — world '{}' seed {} is not the reserved test world",
-                self.world_name, self.world_seed
-            );
+            tracing::debug!("gas: kept persisted gas layer from save (skip re-init/re-seed)");
         }
 
         self.set_state(ServerState::Running);
@@ -438,7 +452,12 @@ impl Server {
         Ok(())
     }
 
-    fn load_world(&mut self, world_path: &Path) -> Result<()> {
+    /// Loads a saved world. Returns `Ok(true)` if a gas layer was also restored
+    /// from the save, or `Ok(false)` if the save predates gas persistence (in
+    /// which case the caller should initialize a fresh gas layer). Loading a gas
+    /// layer is what makes the debug overlay's highlighted pockets survive a
+    /// save/reload; without it the layer would be rebuilt as uniform air.
+    fn load_world(&mut self, world_path: &Path) -> Result<bool> {
         // load world file into Vec<u8>
         let world_file = std::fs::read(world_path)?;
         // decode world file as HashMap<String, Vec<u8>>
@@ -447,7 +466,34 @@ impl Server {
         self.blocks.get_blocks().deserialize(world.get("blocks").unwrap_or(&Vec::new()))?;
         self.walls.get_walls().deserialize(world.get("walls").unwrap_or(&Vec::new()))?;
         self.players.deserialize(world.get("players").unwrap_or(&Vec::new()))?;
-        Ok(())
+
+        // Restore the world's seed from the save. The seed is what the demo-room
+        // seeding check (`world_name == "test" && world_seed == 123`) keys on,
+        // and it was previously lost on reload (the singleplayer selector passed
+        // a literal 0 for existing worlds). Persisting it lets an old test world
+        // without a saved gas layer be correctly re-seeded. Newer saves carry a
+        // gas layer directly, so the seed mainly matters for legacy saves.
+        if let Some(seed_bytes) = world.get("seed") {
+            if let Ok(seed) = bincode::deserialize::<u64>(seed_bytes) {
+                self.world_seed = seed;
+                tracing::debug!("gas: restored world seed {seed} from save");
+            }
+        }
+
+        // Restore the persisted gas layer if the save has one. Old saves (created
+        // before gases were persisted) won't carry the "gases" key, so we fall
+        // back to a fresh air layer rather than fail the whole load.
+        match world.get("gases") {
+            Some(gas_data) => {
+                self.gases.deserialize_layer(gas_data)?;
+                tracing::debug!("gas: restored persisted gas layer from save ({} bytes)", gas_data.len());
+                Ok(true)
+            }
+            None => {
+                tracing::debug!("gas: save has no persisted gas layer (old format); will reinitialize");
+                Ok(false)
+            }
+        }
     }
 
     fn save_world(&self, world_path: &Path) -> Result<()> {
@@ -455,6 +501,11 @@ impl Server {
         world.insert("blocks".to_owned(), self.blocks.get_blocks().serialize()?);
         world.insert("walls".to_owned(), self.walls.get_walls().serialize()?);
         world.insert("players".to_owned(), self.players.serialize()?);
+        // Persist the world's seed so reloading an existing world keeps the same
+        // identity (its stored gas seeding / generation params).
+        world.insert("seed".to_owned(), bincode::serialize(&self.world_seed)?);
+        // Persist the gas layer too so gas pockets / flow state survive a reload.
+        world.insert("gases".to_owned(), self.gases.serialize_layer()?);
 
         let world_file = bincode::serialize(&world)?;
         if !world_path.exists() {
