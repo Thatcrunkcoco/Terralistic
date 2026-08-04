@@ -12,18 +12,19 @@ _Last updated: 2026-08-03 (gas / substance / overlay architecture session)_
 
 ## Next Up
 
-- **Gas → unified substance/flux refactor** (design + implement). Ordered:
-  1. Produce a file-by-file change plan with the exact `Gas*`-naming rename map and the
-     **flow-sim replacement design** — replace the current pressure-diffusion solver in
-     `shared/gases/gas_flow.rs` with a **fixed-volume + buoyancy relocation** solver,
-     preserving the Activity-Scheduler wavefront. (This is the one non-trivial chunk.)
-  2. Implement the data-model unification in `shared/gases/` first (the foundation):
-     collapse `GasCell { gas, pressure }` → `SubstanceCell { gas, amount }`, drop the
-     `air` filler, keep `density` as buoyancy mass, and merge gas **and** liquid into ONE
-     dense array / one scheduler / one network stream / one render pass. Keep `Gas*`
-     naming. Liquids follow as a "second substance" on the same layer.
-  - Full detail + scope gauge (~1,200–1,600 lines / ~10 files): `session_summaries/2026-08-03-gas-substance-vision.md`.
-  - Overlay infra for this is DONE (generic framework + `GasOverlayProvider`) — builds clean, 82/82 tests green.
+- **Gas → unified substance/flux refactor** — currently mid-implementation. Completed:
+  - **Step 1 (DONE):** pure rename `pressure`→`amount` across the layer/flow/server/client.
+  - **Step 2 (DONE):** `GasFlow::tick` rewritten to **fixed-volume leveling + buoyancy layering**
+    (3 passes: level-equalize capped by room+source, apply deduped deltas, swap unstable
+    gas density ordering). `GAS_CELL_MAX_AMOUNT`=100 caps cell volume. Defaults level_rate 50 /
+    buoyancy_rate 50. Buoyancy is now an unconditional swap gated by buoyancy_rate>0.
+    `heavier_gas_sinks` reshaped to assert gas-identity layering. 82/82 tests pass.
+  - **Remaining:** add `air`-filler removal (presentation only — remove `is_atmosphere`/
+    legend air-skip in client), merge liquids as a second substance on the same layer
+    (no structural change needed — just register liquid gas types), and future ONI-grade
+    renderer (deferred).
+  - NOTE: legacy "pressure" wording still in some test function names/comments — cosmetic.
+  - Full detail + scope gauge: `session_summaries/2026-08-03-gas-substance-vision.md`.
 
 ## Decisions
 
