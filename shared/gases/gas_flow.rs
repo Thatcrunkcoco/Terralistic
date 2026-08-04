@@ -2,15 +2,15 @@ use crate::shared::gases::{GasCell, GasId, GasLayer};
 use crate::shared::scheduler::Scheduler;
 
 /// The per-tick flow fraction that a dial value of `100` corresponds to, for
-/// `pressure_rate`.
+/// `level_rate`.
 ///
-/// Pressure equalization is inherently a tiny per-tick fraction of the pressure
+/// Level equalization is inherently a tiny per-tick fraction of the amount
 /// difference (each cell relaxes toward its neighbors a little at a time), so a
 /// raw 0..=1.0 knob would bury the useful range down near 0.01–0.08. Mapping
 /// 100 to this constant spreads that range across a friendly 0-100 dial. The
 /// value (0.1) sits well under the ~0.25-per-neighbor numerical stability
-/// ceiling, so even `pressure_rate: 100` is stable.
-const PRESSURE_RATE_MAX_FRACTION: f32 = 0.1;
+/// ceiling, so even `level_rate: 100` is stable.
+const LEVEL_RATE_MAX_FRACTION: f32 = 0.1;
 
 /// The per-tick flow fraction that a dial value of `100` corresponds to, for
 /// `buoyancy_rate` (kept smaller because buoyancy is a correction term).
@@ -25,9 +25,9 @@ const BUOYANCY_RATE_MAX_FRACTION: f32 = 0.02;
 /// per-tick fraction via the `*_MAX_FRACTION` constants above.
 #[derive(Clone, Copy, Debug)]
 pub struct GasFlowParams {
-    /// 0-100 dial for how quickly pressure equalizes between a cell and one
-    /// neighbor. 0 disables flow entirely; higher = faster dispersion.
-    pub pressure_rate: f32,
+    /// 0-100 dial for how quickly the amount equalizes between a cell and one
+    /// neighbor. 0 disables flow entirely; higher = faster dispersal.
+    pub level_rate: f32,
     /// 0-100 dial for the density-driven vertical bias. Positive values make a
     /// heavier gas above a lighter one sink downward (restoring stable
     /// heavy-below / light-above layering). 0 disables buoyancy.
@@ -37,11 +37,11 @@ pub struct GasFlowParams {
 impl Default for GasFlowParams {
     fn default() -> Self {
         Self {
-            // Slowed to a gentle dispersion: `pressure_rate: 8` maps to a
+            // Slowed to a gentle dispersal: `level_rate: 8` maps to a
             // per-tick fraction of ~0.008, so exposing a sealed pocket to the
             // open atmosphere disperses very gradually instead of rushing out
             // in a burst — much easier to watch the interaction.
-            pressure_rate: 1.0,
+            level_rate: 1.0,
             buoyancy_rate: 1.0,
         }
     }
@@ -49,8 +49,8 @@ impl Default for GasFlowParams {
 
 impl GasFlowParams {
     /// Scales a 0-100 dial value to its per-tick flow fraction.
-    fn pressure_fraction(self) -> f32 {
-        (self.pressure_rate / 100.0) * PRESSURE_RATE_MAX_FRACTION
+    fn level_fraction(self) -> f32 {
+        (self.level_rate / 100.0) * LEVEL_RATE_MAX_FRACTION
     }
 
     /// Scales a 0-100 dial value to its per-tick flow fraction.
@@ -59,7 +59,7 @@ impl GasFlowParams {
     }
 }
 
-/// The gas flow simulation: a pressure-relaxation step driven by an activity
+/// The gas flow simulation: an amount-relaxation step driven by an activity
 /// `Scheduler`.
 ///
 /// Scalability is the core design goal. Rather than iterating every cell in the
@@ -81,9 +81,9 @@ pub struct GasFlow {
     // Reused scratch buffers (avoid re-allocation between ticks).
     width: u32,
     height: u32,
-    pressure_delta: Vec<f32>,
+    amount_delta: Vec<f32>,
     inflow_gas: Vec<GasId>,
-    inflow_weight: Vec<f32>,
+    inflow_amount: Vec<f32>,
     touched: Vec<usize>,
 }
 
@@ -102,9 +102,9 @@ impl GasFlow {
             params,
             width: 0,
             height: 0,
-            pressure_delta: Vec::new(),
+            amount_delta: Vec::new(),
             inflow_gas: Vec::new(),
-            inflow_weight: Vec::new(),
+            inflow_amount: Vec::new(),
             touched: Vec::new(),
         }
     }
@@ -156,21 +156,21 @@ impl GasFlow {
         // world dimensions actually changed, e.g. on world load).
         if self.width != w || self.height != h {
             let len = (w * h) as usize;
-            self.pressure_delta = vec![0.0; len];
+            self.amount_delta = vec![0.0; len];
             self.inflow_gas = vec![GasId::NONE; len];
-            self.inflow_weight = vec![0.0; len];
+            self.inflow_amount = vec![0.0; len];
             self.width = w;
             self.height = h;
         } else {
-            self.pressure_delta.fill(0.0);
+            self.amount_delta.fill(0.0);
             self.inflow_gas.fill(GasId::NONE);
-            self.inflow_weight.fill(0.0);
+            self.inflow_amount.fill(0.0);
         }
         self.touched.clear();
 
-        // Phase 1: compute flow contributions. We read the *current* pressures
+        // Phase 1: compute flow contributions. We read the *current* amounts
         // (a Jacobi relaxation pass) so the result is order-independent, then
-        // accumulate deltas and record which gas dominates each inflow.
+        // accumulate deltas and record which substance dominates each inflow.
         let active_indices: Vec<usize> = self.active.active().collect();
         for idx in &active_indices {
             let (x, y) = untranslate(*idx, w, h);
@@ -179,8 +179,8 @@ impl GasFlow {
                 continue;
             }
             let cell = layer.get_cell_by_index(*idx);
-            let p_c = cell.pressure;
-            if p_c <= 0.0 {
+            let a_c = cell.amount;
+            if a_c <= 0.0 {
                 continue;
             }
             let gas_c = cell.gas;
@@ -200,11 +200,11 @@ impl GasFlow {
                     continue;
                 }
                 let nidx = translate(nx as u32, ny as u32, w, h);
-                let p_n = layer.pressure_by_index(nidx);
+                let a_n = layer.amount_by_index(nidx);
 
-                // Pressure equalization from c -> n (dial 0-100 scaled to a
+                // Amount equalization from c -> n (dial 0-100 scaled to a
                 // per-tick fraction).
-                let mut flow = (p_c - p_n) * self.params.pressure_fraction();
+                let mut flow = (a_c - a_n) * self.params.level_fraction();
 
                 // Buoyancy on the vertical axis only, reinforcing stable layering:
                 // a heavier gas above a lighter one sinks; it never fights an
@@ -218,10 +218,10 @@ impl GasFlow {
                     continue;
                 }
 
-                self.pressure_delta[*idx] -= flow;
-                self.pressure_delta[nidx] += flow;
-                if flow > self.inflow_weight[nidx] {
-                    self.inflow_weight[nidx] = flow;
+                self.amount_delta[*idx] -= flow;
+                self.amount_delta[nidx] += flow;
+                if flow > self.inflow_amount[nidx] {
+                    self.inflow_amount[nidx] = flow;
                     self.inflow_gas[nidx] = gas_c;
                 }
                 self.touched.push(*idx);
@@ -231,19 +231,19 @@ impl GasFlow {
 
         // Phase 2: apply the net deltas and resolve gas types. `touched` may
         // contain each cell multiple times (a cell can flow to several
-        // neighbors), and `pressure_delta[cell]` already holds the *net* change,
+        // neighbors), and `amount_delta[cell]` already holds the *net* change,
         // so we must deduplicate before applying. Applying an index more than
-        // once would compound its delta against the already-updated pressure,
+        // once would compound its delta against the already-updated amount,
         // creating mass out of nothing.
         self.touched.sort_unstable();
         self.touched.dedup();
 
         for idx in &self.touched {
             let gas = layer.gas_by_index(*idx);
-            let p = layer.pressure_by_index(*idx);
-            let new_p = p + self.pressure_delta[*idx];
+            let a = layer.amount_by_index(*idx);
+            let new_amount = a + self.amount_delta[*idx];
 
-            if new_p <= 0.0 {
+            if new_amount <= 0.0 {
                 // Vacuum. Go dormant; a neighbor will wake this cell if gas arrives.
                 layer.set_cell_by_index(*idx, GasCell::new(GasId::NONE, 0.0));
                 self.active.deactivate(*idx);
@@ -254,7 +254,7 @@ impl GasFlow {
                 } else {
                     self.inflow_gas[*idx]
                 };
-                layer.set_cell_by_index(*idx, GasCell::new(new_gas, new_p));
+                layer.set_cell_by_index(*idx, GasCell::new(new_gas, new_amount));
                 // This cell changed; keep it active so equilibrium can continue.
                 self.active.activate(*idx);
             }

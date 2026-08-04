@@ -16,7 +16,7 @@ use crate::shared::packet::Packet;
 const GAS_DEBUG_UPDATE_INTERVAL_TICKS: u32 = 10;
 
 /// Maximum number of differing cells carried in a single gas-layer update chunk.
-/// Each entry serializes to ~12 bytes (index + gas id + pressure), so with this
+/// Each entry serializes to ~12 bytes (index + gas id + amount), so with this
 /// cap a single chunk stays well under the ~65KB framed-TCP wire limit. The
 /// snapshot is split into multiple chunks when more cells differ.
 const GAS_DEBUG_CHUNK_MAX_CELLS: usize = 3000;
@@ -159,13 +159,13 @@ impl ServerGases {
             (256, 261, oxygen, 145.0),   // ~air density: gentle outward
             (262, 267, hydrogen, 120.0), // very light: rises out the top
         ];
-        for (x0, x1, gas, pressure) in boxes {
+        for (x0, x1, gas, amount) in boxes {
             if gas.is_none() {
                 continue;
             }
             for x in x0..x1 {
                 for y in 174..179 {
-                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, pressure));
+                    let _ = self.layer.set_cell(x, y, GasCell::new(gas, amount));
                     self.flow.activate(x as u32, y as u32, width, height);
                 }
             }
@@ -179,7 +179,7 @@ impl ServerGases {
             for y in 174..179 {
                 let row: Vec<String> = (x0..x1)
                     .map(|x| match self.layer.get_cell(x, y) {
-                        Ok(c) => format!("{}({:.0})", c.gas.raw(), c.pressure),
+                        Ok(c) => format!("{}({:.0})", c.gas.raw(), c.amount),
                         Err(_) => "ERR".to_owned(),
                     })
                     .collect();
@@ -296,14 +296,14 @@ impl ServerGases {
                 {
                     let mut dist: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
                     for c in self.layer.cells() {
-                        let key = format!("{}@{}", c.gas.raw(), c.pressure as i32);
+                        let key = format!("{}@{}", c.gas.raw(), c.amount as i32);
                         *dist.entry(key).or_insert(0) += 1;
                     }
                     let mut top: Vec<_> = dist.into_iter().collect();
                     top.sort_by(|a, b| b.1.cmp(&a.1));
                     let top_s: String = top.iter().take(6).map(|(k, n)| format!("{k}:{n}")).collect::<Vec<_>>().join(" ");
                     let base = chunks.first().map(|c| {
-                        format!("{}@{}", c.base.gas.raw(), c.base.pressure as i32)
+                        format!("{}@{}", c.base.gas.raw(), c.base.amount as i32)
                     }).unwrap_or_else(|| "none".to_owned());
                     tracing::debug!("gas[dist] n_distinct_cells={} base={base} top: {top_s}", top.len());
                 }
@@ -317,7 +317,7 @@ impl ServerGases {
                 // (sparse dump of one representative column each, once per update).
                 let probe = |x: i32, y: i32| -> String {
                     match self.layer.get_cell(x, y) {
-                        Ok(c) => format!("g{}@{}", c.gas.raw(), c.pressure as i32),
+                        Ok(c) => format!("g{}@{}", c.gas.raw(), c.amount as i32),
                         Err(_) => "ERR".to_owned(),
                     }
                 };

@@ -168,7 +168,7 @@ mod tests {
         for x in [0, 10, 40, 63] {
             for y in [0, 15, 33, 63] {
                 assert_eq!(decoded.get_cell(x, y).unwrap().gas, layer.get_cell(x, y).unwrap().gas, "gas mismatch at {x},{y}");
-                assert!((decoded.get_cell(x, y).unwrap().pressure - layer.get_cell(x, y).unwrap().pressure).abs() < 0.001, "pressure mismatch at {x},{y}");
+                assert!((decoded.get_cell(x, y).unwrap().amount - layer.get_cell(x, y).unwrap().amount).abs() < 0.001, "amount mismatch at {x},{y}");
             }
         }
     }
@@ -189,7 +189,7 @@ mod tests {
         decoded.apply_chunk(&chunks[0]);
         assert_eq!(decoded.get_size(), (10, 10));
         assert_eq!(decoded.get_cell(5, 5).unwrap().gas, air);
-        assert_eq!(decoded.get_cell(5, 5).unwrap().pressure, 100.0);
+        assert_eq!(decoded.get_cell(5, 5).unwrap().amount, 100.0);
     }
 
     #[test]
@@ -209,7 +209,7 @@ mod tests {
         // every cell is filled with the requested gas + pressure
         let cell = layer.get_cell(5, 5).unwrap();
         assert_eq!(cell.gas, o2);
-        assert_eq!(cell.pressure, 100.0);
+        assert_eq!(cell.amount, 100.0);
     }
 
     #[test]
@@ -222,8 +222,8 @@ mod tests {
         layer.set_cell(0, 0, GasCell::new(co2, 9.0)).unwrap();
         layer.set_cell(49, 49, GasCell::new(co2, 25.0)).unwrap();
         assert_eq!(layer.get_cell(0, 0).unwrap().gas, co2);
-        assert_eq!(layer.get_cell(0, 0).unwrap().pressure, 9.0);
-        assert_eq!(layer.get_cell(49, 49).unwrap().pressure, 25.0);
+        assert_eq!(layer.get_cell(0, 0).unwrap().amount, 9.0);
+        assert_eq!(layer.get_cell(49, 49).unwrap().amount, 25.0);
     }
 
     #[test]
@@ -250,7 +250,7 @@ mod tests {
         let decoded: GasLayer = bincode::deserialize(&bytes).unwrap();
         assert_eq!(decoded.get_size(), (5, 5));
         assert_eq!(decoded.get_cell(2, 3).unwrap().gas, co2);
-        assert_eq!(decoded.get_cell(2, 3).unwrap().pressure, 42.0);
+        assert_eq!(decoded.get_cell(2, 3).unwrap().amount, 42.0);
         assert_eq!(decoded.get_cell(0, 0).unwrap().gas, o2);
     }
 
@@ -269,9 +269,9 @@ mod tests {
 
         assert_eq!(decoded.get_size(), (40, 20));
         assert_eq!(decoded.get_cell(10, 15).unwrap().gas, co2);
-        assert_eq!(decoded.get_cell(10, 15).unwrap().pressure, 250.0);
+        assert_eq!(decoded.get_cell(10, 15).unwrap().amount, 250.0);
         assert_eq!(decoded.get_cell(1, 1).unwrap().gas, air);
-        assert_eq!(decoded.get_cell(1, 1).unwrap().pressure, 100.0);
+        assert_eq!(decoded.get_cell(1, 1).unwrap().amount, 100.0);
     }
 
     // --- GasFlow tests ---
@@ -315,15 +315,15 @@ mod tests {
     }
 
     impl GasTestWorld {
-        fn new(w: u32, h: u32, fill_gas: GasId, fill_pressure: f32) -> Self {
+        fn new(w: u32, h: u32, fill_gas: GasId, fill_amount: f32) -> Self {
             let mut gases = Gases::new();
             // register light + heavy so ids are stable (0, 1)
             gases.register_new_gas_type(GasType::new("light".to_owned(), 1.0)).unwrap();
             gases.register_new_gas_type(GasType::new("heavy".to_owned(), 3.0)).unwrap();
             let mut layer = GasLayer::new();
-            layer.create((w, h), fill_gas, fill_pressure);
+            layer.create((w, h), fill_gas, fill_amount);
             let flow = GasFlow::with_params(GasFlowParams {
-                pressure_rate: 80.0,
+                level_rate: 80.0,
                 buoyancy_rate: 100.0,
             });
             let map = OpenMap::new(w, h);
@@ -350,7 +350,7 @@ mod tests {
         }
 
         fn p(&self, x: i32, y: i32) -> f32 {
-            self.layer.get_cell(x, y).unwrap().pressure
+            self.layer.get_cell(x, y).unwrap().amount
         }
     }
 
@@ -504,7 +504,7 @@ mod tests {
 
     let mut layer = GasLayer::new();
     layer.create((w, h), air, 100.0);
-    let flow = GasFlow::with_params(GasFlowParams { pressure_rate: 80.0, buoyancy_rate: 100.0 });
+    let flow = GasFlow::with_params(GasFlowParams { level_rate: 80.0, buoyancy_rate: 100.0 });
 
     // Build an OpenMap with the box walls solid (matching stone_box). The boxes
     // occupy interiors y in [174..179], with a shared 1-block wall between
@@ -541,11 +541,11 @@ mod tests {
 
     let post_chunks = layer.update_chunks(3000);
     let post_diff: usize = post_chunks.iter().map(|c| c.indexes.len()).sum();
-    let base = post_chunks.first().map(|c| format!("{}@{}", c.base.gas.raw(), c.base.pressure as i32)).unwrap();
+    let base = post_chunks.first().map(|c| format!("{}@{}", c.base.gas.raw(), c.base.amount as i32)).unwrap();
     eprintln!("POST-FLOW diff cells = {post_diff}, base = {base}");
     let cell = |x: i32, y: i32| -> String {
         match layer.get_cell(x, y) {
-            Ok(c) => format!("{}@{}", c.gas.raw(), c.pressure as i32),
+            Ok(c) => format!("{}@{}", c.gas.raw(), c.amount as i32),
             Err(_) => "ERR".to_owned(),
         }
     };

@@ -3,21 +3,22 @@ use anyhow::{anyhow, Result};
 use crate::shared::gases::GasId;
 use crate::shared::world_map::WorldMap;
 
-/// Per-tile gas state. This is the *instance* layer counterpart to `GasType`:
-/// every cell in the world holds one of these, describing which gas occupies the
-/// tile and how much of it is present (`pressure`).
+/// Per-tile gas/substance state. This is the *instance* layer counterpart to
+/// `GasType`: every cell in the world holds one of these, describing which
+/// substance occupies the tile and how much of it is present (`amount`).
 ///
 /// It is deliberately tiny and densely stored — a `GasId` (a 4-byte dense index)
-/// plus a pressure value — so a full world layer stays memory-cheap and
+/// plus an `amount` value — so a full world layer stays memory-cheap and
 /// cache-friendly regardless of how many distinct gas types exist. Identity is
 /// the compact `GasId`; density/heating behavior lives in the `GasType`.
 #[derive(Clone, Copy, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
 pub struct GasCell {
-    /// The gas occupying this cell.
+    /// The substance (gas or liquid) occupying this cell.
     pub gas: GasId,
-    /// How much gas is present. Higher pressure = more gas. The exact scale is
-    /// defined by the flow simulation (Step 3); for now it is opaque state.
-    pub pressure: f32,
+    /// How much of the substance is present. Higher amount = more of it. The
+    /// exact scale is defined by the (fixed-volume) flow simulation; for now it
+    /// is opaque state.
+    pub amount: f32,
 }
 
 impl Default for GasCell {
@@ -27,17 +28,17 @@ impl Default for GasCell {
 }
 
 impl GasCell {
-    /// A cell of the given gas with the given pressure.
+    /// A cell of the given gas with the given amount.
     #[must_use]
-    pub const fn new(gas: GasId, pressure: f32) -> Self {
-        Self { gas, pressure }
+    pub const fn new(gas: GasId, amount: f32) -> Self {
+        Self { gas, amount }
     }
 }
 
 /// A compact, sparse snapshot of a gas layer for transport over the network.
 ///
-/// The full dense layer is too large for the framed-TCP wire limit once pressure
-/// varies, so this sends the common `base` cell plus only the cells that differ
+/// The full dense layer is too large for the framed-TCP wire limit once the
+/// amount varies, so this sends the common `base` cell plus only the cells that differ
 /// from it. A mostly-uniform atmosphere serializes to a few kilobytes.
 #[derive(serde_derive::Serialize, serde_derive::Deserialize, Default, Clone)]
 pub struct GasLayerPatch {
@@ -60,7 +61,7 @@ impl GasLayer {
         let mut counts: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
         let mut by_key: std::collections::HashMap<u64, GasCell> = std::collections::HashMap::new();
         for c in &self.cells {
-            let key = ((c.gas.raw() as u64) << 32) | (c.pressure as u32 as u64);
+            let key = ((c.gas.raw() as u64) << 32) | (c.amount as u32 as u64);
             *counts.entry(key).or_insert(0) += 1;
             by_key.entry(key).or_insert(*c);
         }
@@ -128,7 +129,7 @@ impl GasLayer {
     ///
     /// The first chunk carries `start_of_frame = true` so the client resets its
     /// base; subsequent chunks only overwrite their listed cells. This keeps the
-    /// debug overlay's live view bounded even when gas pressures vary across a
+    /// debug overlay's live view bounded even when gas/substance amounts vary across a
     /// whole open world (where a single patch would otherwise be far too large
     /// to serialize into one frame).
     #[must_use]
@@ -233,10 +234,10 @@ impl GasLayer {
     }
 
     /// Creates a gas layer of the given size, with every cell set to the given
-    /// fill gas at the given pressure.
-    pub fn create(&mut self, size: (u32, u32), fill_gas: GasId, fill_pressure: f32) {
+    /// fill gas at the given amount.
+    pub fn create(&mut self, size: (u32, u32), fill_gas: GasId, fill_amount: f32) {
         self.map = WorldMap::new(size);
-        let cell = GasCell::new(fill_gas, fill_pressure);
+        let cell = GasCell::new(fill_gas, fill_amount);
         self.cells = vec![cell; (size.0 * size.1) as usize];
     }
 
@@ -302,14 +303,14 @@ impl GasLayer {
         self.get_cell_by_index(index).gas
     }
 
-    /// The pressure at a raw dense index.
+    /// The amount at a raw dense index.
     #[must_use]
-    pub fn pressure_by_index(&self, index: usize) -> f32 {
-        self.get_cell_by_index(index).pressure
+    pub fn amount_by_index(&self, index: usize) -> f32 {
+        self.get_cell_by_index(index).amount
     }
 
     /// Serializes the layer as a sparse, snap-compressed patch for transport.
-    /// The dense layer is too large for the framed-TCP wire limit once pressure
+    /// The dense layer is too large for the framed-TCP wire limit once amount
     /// varies, so we ship only the cells that differ from the common value.
     pub fn serialize(&self) -> Result<Vec<u8>> {
         let patch = self.make_patch();

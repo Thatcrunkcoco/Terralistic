@@ -81,7 +81,7 @@ impl ClientGases {
             } else if air_id != Some(c.gas) {
                 non_air += 1;
                 if first_non_air.is_none() {
-                    first_non_air = Some((i, c.gas.raw(), c.pressure));
+                    first_non_air = Some((i, c.gas.raw(), c.amount));
                 }
             }
         }
@@ -158,7 +158,7 @@ impl ClientGases {
 
     /// Whether the given gas is the world's default breathable atmosphere
     /// (registered as "air"). The overlay treats this specially: since air fills
-    /// virtually the entire world at uniform pressure, rendering it the same as
+    /// virtually the entire world at uniform amount, rendering it the same as
     /// notable gases would paint everything one flat color and drown out the
     /// pockets we actually want to highlight. Air is instead rendered faint and
     /// neutral so the world reads as gray and only non-air gases stand out.
