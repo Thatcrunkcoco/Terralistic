@@ -12,8 +12,10 @@ use crate::libraries::graphics::blur::BlurContext;
 use crate::libraries::graphics::events::sdl_event_to_gfx_event;
 use crate::libraries::graphics::passthrough_shader::PassthroughShader;
 use crate::libraries::graphics::shadow::ShadowContext;
+use crate::libraries::graphics::substance::FieldShader;
 use crate::libraries::graphics::substance::SubstanceShader;
 use crate::libraries::graphics::transformation::Transformation;
+use crate::libraries::graphics::vertex_buffer::{DrawMode, VertexBuffer};
 use crate::libraries::graphics::Font;
 
 /// This stores all the values needed for rendering.
@@ -29,6 +31,7 @@ pub struct GraphicsContext {
     blur_context: BlurContext,
     pub(super) passthrough_shader: PassthroughShader,
     pub(super) substance_shader: SubstanceShader,
+    pub(super) field_shader: FieldShader,
     events_queue: VecDeque<gfx::Event>,
     window_open: bool,
     // Keep track of all Key states as a hashmap
@@ -82,6 +85,7 @@ impl GraphicsContext {
 
         let passthrough_shader = PassthroughShader::new()?;
         let substance_shader = SubstanceShader::new()?;
+        let field_shader = FieldShader::new()?;
         let mut window_texture = 0;
         let mut window_texture_back = 0;
         let mut window_framebuffer = 0;
@@ -113,6 +117,7 @@ impl GraphicsContext {
             blur_context: BlurContext::new()?,
             passthrough_shader,
             substance_shader,
+            field_shader,
             shadow_context,
             events_queue: VecDeque::new(),
             window_open: true,
@@ -370,6 +375,48 @@ impl GraphicsContext {
     /// Blurs a given rectangle on the screen
     pub(super) fn blur_rect(&self, rect: gfx::Rect, radius: i32) {
         self.blur_region(rect, radius, self.window_texture, self.window_texture_back, self.get_window_size(), &self.normalization_transform);
+    }
+
+    /// Renders the high-fidelity *field-texture* substance layer.
+    ///
+    /// The caller bakes the visible substance region into an RGBA field texture
+    /// (`field_texture`, 1 texel = 1 tile) and fills `quad` with a screen-space
+    /// region quad whose tex channel carries each corner's world position. This
+    /// binds the field shader, sets its uniforms (transform, cell/tile sizes,
+    /// animation time, bubble toggle), and draws the quad — the shader bilinearly
+    /// samples the field so fluids read as smooth, wavy bodies rather than
+    /// blocky per-tile cells. The passthrough shader is restored afterward.
+    ///
+    /// `cell_size` is the world-space size of one cell; `tile_origin` / `field_size`
+    /// describe, in tiles, where the field texture starts and how many tiles it
+    /// covers (used to map world coords to texture UVs).
+    pub fn render_field(
+        &self,
+        quad: &VertexBuffer,
+        field_texture: u32,
+        cell_size: gfx::FloatSize,
+        tile_origin: gfx::FloatSize,
+        field_size: gfx::FloatSize,
+        time: f32,
+        has_bubbles: bool,
+    ) {
+        unsafe {
+            gl::UseProgram(self.field_shader.program);
+            gl::Uniform1f(self.field_shader.time, time);
+            gl::Uniform2f(self.field_shader.cell_size, cell_size.0, cell_size.1);
+            gl::Uniform2f(self.field_shader.tile_origin, tile_origin.0, tile_origin.1);
+            gl::Uniform2f(self.field_shader.field_size, field_size.0, field_size.1);
+            gl::Uniform1i(self.field_shader.has_bubbles, i32::from(has_bubbles));
+            gl::Uniform1i(self.field_shader.field_tex, 0);
+            gl::UniformMatrix3fv(self.field_shader.transform_matrix, 1, gl::FALSE, self.normalization_transform.matrix.as_ptr());
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, field_texture);
+        }
+        // Draw with has_texture = true purely to enable attribute 2 (world pos).
+        quad.draw(true, DrawMode::Triangles);
+        unsafe {
+            gl::UseProgram(self.passthrough_shader.passthrough_shader);
+        }
     }
 
     pub fn enable_blur(&mut self, enable: bool) {

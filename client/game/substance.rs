@@ -5,8 +5,8 @@ use crate::client::game::gases::ClientGases;
 use crate::libraries::graphics as gfx;
 use crate::shared::blocks::RENDER_BLOCK_WIDTH;
 
-/// The maximum number of substance cells drawn per frame, matching the overlay
-/// framework's budget so a huge zoomed-out view can't blow up per-frame cost.
+/// The maximum number of substance cells considered per frame, matching the
+/// overlay framework's budget so a huge zoomed-out view can't blow up cost.
 const MAX_SUBSTANCE_CELLS: usize = 120_000;
 
 /// Per-gas rendering attributes resolved once per distinct gas id per frame.
@@ -23,35 +23,46 @@ pub(crate) struct GasAppearance {
 /// Renders the shared substance layer (gases *and* liquids) as an always-on,
 /// cartoon-styled fluid display.
 ///
-/// Unlike the flat debug overlay (solid per-cell rectangles with no motion),
-/// this renderer feeds every visible cell through the procedural *substance*
-/// shader: per-substance color, animated roil (gases billow, liquid surfaces
-/// gurgle), rising bubbles for liquids, and soft alpha edges. The data source is
-/// the same single `GasLayer` that gases and liquids share — liquids are just
-/// dense gas types — so there is no separate liquid path to maintain.
+/// This is the high-fidelity *field-texture* renderer. Rather than drawing one
+/// flat quad per tile (which made every block read as a single pixel), it
+/// bakes the visible substance region into a small RGBA **field texture**
+/// (1 texel = 1 tile) and draws ONE quad through the field shader. The GPU's
+/// bilinear filter blurs adjacent tiles into a smooth, continuous body of fluid,
+/// feathers boundary cells into soft edges, and the shader's sub-tile ripple
+/// undulates the surface — so liquids read as wavy, cartoon water instead of
+/// blocky cells.
 ///
-/// The renderer batches all cells into two draw calls (gases, then liquids) so
-/// the bubble treatment can differ per phase, and reuses the viewport culling
-/// logic to only draw what's on screen.
+/// The data source is the same single `GasLayer` that gases and liquids share
+/// (liquids are just dense gas types), so there is no separate liquid path.
 pub struct SubstanceRenderer {
-    /// Rolling seconds for the shader's animation; owned here so the wobble
-    /// advances smoothly across frames.
+    /// Rolling seconds for the shader's animation.
     time: gfx::SubstanceTime,
+    /// GPU field texture (1 texel = 1 visible tile, RGBA). Re-uploaded each
+    /// frame for the visible region. Set to 0 until first render (GL context
+    /// may not be current at construction time).
+    field_texture: u32,
+    /// Region-quad buffers reused across frames.
+    gas_quad: gfx::VertexBuffer,
+    liquid_quad: gfx::VertexBuffer,
 }
+
+/// Opaque fill: the shader's multi-tap blur creates soft feathered edges and a
+/// smooth surface from the hard opaque/empty transition, so cells no longer
+/// render with a visible block-sized alpha outline band.
+const FILL_ALPHA: u8 = 255;
 
 impl SubstanceRenderer {
     #[must_use]
     pub fn new() -> Self {
         Self {
             time: gfx::SubstanceTime::new(),
+            field_texture: 0,
+            gas_quad: gfx::VertexBuffer::new(),
+            liquid_quad: gfx::VertexBuffer::new(),
         }
     }
 
-    /// Draws all visible, renderable substance cells over the terrain.
-    ///
-    /// `gases` supplies both the layer data and the per-gas classification /
-    /// color. Called right after terrain (background/walls/blocks) and before
-    /// players/items so fluids sit beneath entities like a backdrop layer.
+    /// Draws the visible substance region as a smooth, animated fluid field.
     pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, camera: &Camera, gases: &ClientGases) -> Result<(), anyhow::Error> {
         let layer = gases.layer();
         let (world_w, world_h) = layer.get_size();
@@ -60,128 +71,142 @@ impl SubstanceRenderer {
         }
 
         let time = self.time.seconds();
+        let (top_left_x, top_left_y) = camera.get_top_left(graphics);
+        let (bottom_right_x, bottom_right_y) = camera.get_bottom_right(graphics);
 
-        // One batch per phase: gases (soft motes), then liquids (bubbles). Each
-        // rect carries its world-space footprint in the tex channel for the
-        // fragment noise, and its per-cell base color in the vertex color.
-        //
-        // Per-gas appearance is computed once per distinct gas id and cached for
-        // the frame (gas ids are dense, small indices), so we don't re-lock the
-        // gas registry for every visible cell.
-        let mut gas_batch = gfx::RectArray::new();
-        let mut liquid_batch = gfx::RectArray::new();
-        let mut gas_count = 0usize;
-        let mut liquid_count = 0usize;
+        // Visible tile range, clamped to world bounds (same culling as v1).
+        let start_x = i32::max(0, top_left_x.floor() as i32);
+        let start_y = i32::max(0, top_left_y.floor() as i32);
+        let end_x = i32::min(world_w as i32, bottom_right_x.ceil() as i32 + 1);
+        let end_y = i32::min(world_h as i32, bottom_right_y.ceil() as i32 + 1);
+
+        if end_x <= start_x || end_y <= start_y {
+            return Ok(());
+        }
+        let region_w = end_x - start_x;
+        let region_h = end_y - start_y;
+
+        self.ensure_field_texture();
+
+        // Per-gas appearance cache (distinct gas ids are few — ~6 per world).
         let mut appearance: std::collections::HashMap<i32, GasAppearance> = std::collections::HashMap::new();
 
-        self.iter_visible_cells(graphics, camera, world_w as i32, world_h as i32, |x, y| {
-            let cell = match layer.get_cell(x, y) {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let id = cell.gas.raw();
-            let app = appearance.entry(id).or_insert_with(|| gases.appearance(cell.gas));
-            if !app.renderable {
-                return;
+        // Build the two field buffers (gases & liquids) as RGBA bytes, one texel
+        // per visible tile, row-major from the top-left of the region.
+        let mut gas_pixels: Vec<u8> = vec![0; (region_w * region_h * 4) as usize];
+        let mut liquid_pixels: Vec<u8> = vec![0; (region_w * region_h * 4) as usize];
+
+        let mut scanned = 0usize;
+        'outer: for y in start_y..end_y {
+            for x in start_x..end_x {
+                let cell = match layer.get_cell(x, y) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        scanned += 1;
+                        continue;
+                    }
+                };
+                let id = cell.gas.raw();
+                let app = appearance.entry(id).or_insert_with(|| gases.appearance(cell.gas));
+
+                if app.renderable {
+                    let c = app.color.set_a(FILL_ALPHA);
+                    let idx = (((y - start_y) * region_w + (x - start_x)) * 4) as usize;
+                    if app.liquid {
+                        liquid_pixels[idx] = c.r;
+                        liquid_pixels[idx + 1] = c.g;
+                        liquid_pixels[idx + 2] = c.b;
+                        liquid_pixels[idx + 3] = c.a;
+                    } else {
+                        gas_pixels[idx] = c.r;
+                        gas_pixels[idx + 1] = c.g;
+                        gas_pixels[idx + 2] = c.b;
+                        gas_pixels[idx + 3] = c.a;
+                    }
+                }
+
+                scanned += 1;
+                if scanned >= MAX_SUBSTANCE_CELLS {
+                    break 'outer;
+                }
             }
-
-            // Screen-space rect for on-screen placement (matches the overlay's
-            // viewport-relative coordinate math).
-            let (top_left_x, top_left_y) = camera.get_top_left(graphics);
-            let screen_x = x as f32 * RENDER_BLOCK_WIDTH - top_left_x * RENDER_BLOCK_WIDTH;
-            let screen_y = y as f32 * RENDER_BLOCK_WIDTH - top_left_y * RENDER_BLOCK_WIDTH;
-            let rect = gfx::Rect::new(
-                gfx::FloatPos(screen_x.round(), screen_y.round()),
-                gfx::FloatSize(RENDER_BLOCK_WIDTH, RENDER_BLOCK_WIDTH),
-            );
-
-            // World-space footprint goes into the tex channel (the fragment shader
-            // reads it as `world_pos`). Anchoring noise to world space keeps the
-            // wobble glued to the world as the camera moves.
-            let world_rect = gfx::Rect::new(
-                gfx::FloatPos(x as f32 * RENDER_BLOCK_WIDTH, y as f32 * RENDER_BLOCK_WIDTH),
-                gfx::FloatSize(RENDER_BLOCK_WIDTH, RENDER_BLOCK_WIDTH),
-            );
-
-            // Soft edges: interior cells (the same substance all around) render
-            // more opaque; boundary cells (adjacent to empty space or a different
-            // substance) fade out so gas pockets billow and liquid surfaces soften
-            // instead of ending in a hard wall of color.
-            let interior = Self::is_interior(layer, x, y, cell.gas);
-            let alpha = if interior { 225 } else { 110 };
-            let base_color = app.color.set_a(alpha);
-            let colors = [base_color; 4];
-
-            if app.liquid {
-                liquid_batch.add_rect(&rect, &colors, &world_rect);
-                liquid_count += 1;
-            } else {
-                gas_batch.add_rect(&rect, &colors, &world_rect);
-                gas_count += 1;
-            }
-        });
+        }
 
         let cell_size = gfx::FloatSize(RENDER_BLOCK_WIDTH, RENDER_BLOCK_WIDTH);
-        if gas_count > 0 {
-            gas_batch.update();
-            gas_batch.render_substance(graphics, cell_size, false, time);
+        let tile_origin = gfx::FloatSize(start_x as f32, start_y as f32);
+        let field_size = gfx::FloatSize(region_w as f32, region_h as f32);
+
+        // The region quad's screen-space corners. Tile (x,y) sits at
+        // (x*BLOCK - top*BLOCK) on screen; its world (+screen-offset-free) pos is
+        // (x*BLOCK, y*BLOCK) which we bake into the tex channel for the shader to
+        // anchor noise and compute UVs. Built fresh each frame (camera moves).
+        let screen_x0 = start_x as f32 * RENDER_BLOCK_WIDTH - top_left_x * RENDER_BLOCK_WIDTH;
+        let screen_y0 = start_y as f32 * RENDER_BLOCK_WIDTH - top_left_y * RENDER_BLOCK_WIDTH;
+        let screen_x1 = end_x as f32 * RENDER_BLOCK_WIDTH - top_left_x * RENDER_BLOCK_WIDTH;
+        let screen_y1 = end_y as f32 * RENDER_BLOCK_WIDTH - top_left_y * RENDER_BLOCK_WIDTH;
+        let world_x0 = start_x as f32 * RENDER_BLOCK_WIDTH;
+        let world_y0 = start_y as f32 * RENDER_BLOCK_WIDTH;
+        let world_x1 = end_x as f32 * RENDER_BLOCK_WIDTH;
+        let world_y1 = end_y as f32 * RENDER_BLOCK_WIDTH;
+
+        // Two draw calls: gases first (soft motes), then liquids (bubbles) on
+        // top. Each uploads its own field buffer and draws the region quad.
+        let has_gas = gas_pixels.iter().any(|&b| b != 0);
+        let has_liquid = liquid_pixels.iter().any(|&b| b != 0);
+
+        let screen_corners = [
+            gfx::FloatPos(screen_x0, screen_y0),
+            gfx::FloatPos(screen_x1, screen_y0),
+            gfx::FloatPos(screen_x0, screen_y1),
+            gfx::FloatPos(screen_x1, screen_y1),
+        ];
+        let world_corners = [
+            gfx::FloatPos(world_x0, world_y0),
+            gfx::FloatPos(world_x1, world_y0),
+            gfx::FloatPos(world_x0, world_y1),
+            gfx::FloatPos(world_x1, world_y1),
+        ];
+
+        if has_liquid {
+            Self::upload_field(self.field_texture, &liquid_pixels, region_w, region_h);
+            self.liquid_quad.build_region_quad(screen_corners, world_corners);
+            self.liquid_quad.upload();
+            graphics.render_field(&self.liquid_quad, self.field_texture, cell_size, tile_origin, field_size, time, true);
         }
-        if liquid_count > 0 {
-            liquid_batch.update();
-            liquid_batch.render_substance(graphics, cell_size, true, time);
+        if has_gas {
+            Self::upload_field(self.field_texture, &gas_pixels, region_w, region_h);
+            self.gas_quad.build_region_quad(screen_corners, world_corners);
+            self.gas_quad.upload();
+            graphics.render_field(&self.gas_quad, self.field_texture, cell_size, tile_origin, field_size, time, false);
         }
 
         Ok(())
     }
 
-    /// Whether a cell is fully surrounded (cardinal neighbors) by the same
-    /// substance. Interior cells render more opaque (a solid body of fluid);
-    /// boundary cells fade to create a soft, billowing edge. `layer` may extend
-    /// beyond the visible-viewport cells being drawn, and both bounds and
-    /// neighbor content are checked.
-    fn is_interior(layer: &crate::shared::gases::GasLayer, x: i32, y: i32, gas: crate::shared::gases::GasId) -> bool {
-        for (nx, ny) in [(x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)] {
-            match layer.get_cell(nx, ny) {
-                Ok(neighbor) => {
-                    if neighbor.gas != gas {
-                        return false;
-                    }
-                }
-                // Out of world bounds counts as a boundary: fade the edge cell.
-                Err(_) => return false,
-            }
+    /// Uploads an RGBA field buffer (row-major, top-to-bottom) to the GPU field
+    /// texture. The texture object keeps its LINEAR filter + wrapping from init,
+    /// so a same-size re-upload just refreshes the data.
+    fn upload_field(texture: u32, pixels: &[u8], w: i32, h: i32) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, texture);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, w, h, 0, gl::RGBA, gl::UNSIGNED_BYTE, pixels.as_ptr().cast());
         }
-        true
     }
 
-    /// Iterates every tile within the camera's viewport (clamped to world bounds)
-    /// up to `MAX_SUBSTANCE_CELLS`, calling `f` for each visited tile. Mirrors the
-    /// overlay framework's culling/capping so we never scan the whole world.
-    fn iter_visible_cells(
-        &self,
-        graphics: &gfx::GraphicsContext,
-        camera: &Camera,
-        world_w: i32,
-        world_h: i32,
-        mut f: impl FnMut(i32, i32),
-    ) {
-        let (top_left_x, top_left_y) = camera.get_top_left(graphics);
-        let (bottom_right_x, bottom_right_y) = camera.get_bottom_right(graphics);
 
-        let start_x = i32::max(0, top_left_x as i32);
-        let start_y = i32::max(0, top_left_y as i32);
-        let end_x = i32::min(world_w, bottom_right_x as i32 + 1);
-        let end_y = i32::min(world_h, bottom_right_y as i32 + 1);
-
-        let mut drawn = 0usize;
-        'outer: for x in start_x..end_x {
-            for y in start_y..end_y {
-                f(x, y);
-                drawn += 1;
-                if drawn >= MAX_SUBSTANCE_CELLS {
-                    break 'outer;
-                }
-            }
+    /// Lazily creates the GPU field texture with LINEAR (bilinear) filtering and
+    /// clamped wrapping, so field sampling feathers edges and stays in bounds.
+    fn ensure_field_texture(&mut self) {
+        if self.field_texture != 0 {
+            return;
+        }
+        unsafe {
+            gl::GenTextures(1, &mut self.field_texture);
+            gl::BindTexture(gl::TEXTURE_2D, self.field_texture);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
         }
     }
 }

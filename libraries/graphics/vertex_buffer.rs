@@ -47,6 +47,33 @@ impl VertexBuffer {
         result
     }
 
+    /// Removes all vertices, ready for a fresh batch.
+    pub fn clear(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
+    }
+
+    /// Fills the buffer with a single screen-space quad (two triangles) whose
+    /// tex channel carries the caller's per-vertex *world* footprint — used by
+    /// the field-texture substance renderer, which bakes world coords into the
+    /// tex channel so the shader can anchor noise and compute UVs.
+    pub fn build_region_quad(
+        &mut self,
+        screen: [gfx::FloatPos; 4],
+        world: [gfx::FloatPos; 4],
+    ) {
+        self.clear();
+        let white = gfx::Color::new(255, 255, 255, 255);
+        // [tl, tr, bl, tr, br, bl]
+        for &i in &[0usize, 1, 2, 1, 3, 2] {
+            self.add_vertex(&Vertex {
+                pos: screen[i],
+                color: white,
+                tex_pos: world[i],
+            });
+        }
+    }
+
     pub fn add_vertex(&mut self, vertex: &Vertex) {
         let index = self.vertices.len() as u32 / 8;
         self.indices.push(index);
