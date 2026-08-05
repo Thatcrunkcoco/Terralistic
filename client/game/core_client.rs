@@ -181,7 +181,7 @@ pub fn run_game(
         // Draw the always-on procedural substance layer (gases + liquids) right
         // after the terrain, before players/items/HUD, so fluids sit beneath
         // entities like a cartoony backdrop of roiling gas and bubbling liquid.
-        substance_renderer.render(graphics, &camera, &gases)?;
+        substance_renderer.render(graphics, &camera, &gases, &blocks.get_blocks())?;
         // Draw the gas overlay immediately after the terrain (background/walls/
         // blocks) but before players/items/HUD, so its gray wash only desaturates
         // the world and the gas cells remain the focus while entities stay readable.

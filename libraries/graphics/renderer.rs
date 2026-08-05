@@ -394,6 +394,7 @@ impl GraphicsContext {
         &self,
         quad: &VertexBuffer,
         field_texture: u32,
+        block_mask_texture: u32,
         cell_size: gfx::FloatSize,
         tile_origin: gfx::FloatSize,
         field_size: gfx::FloatSize,
@@ -408,9 +409,13 @@ impl GraphicsContext {
             gl::Uniform2f(self.field_shader.field_size, field_size.0, field_size.1);
             gl::Uniform1i(self.field_shader.has_bubbles, i32::from(has_bubbles));
             gl::Uniform1i(self.field_shader.field_tex, 0);
+            gl::Uniform1i(self.field_shader.block_mask, 1);
             gl::UniformMatrix3fv(self.field_shader.transform_matrix, 1, gl::FALSE, self.normalization_transform.matrix.as_ptr());
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, field_texture);
+            gl::ActiveTexture(gl::TEXTURE1);
+            gl::BindTexture(gl::TEXTURE_2D, block_mask_texture);
+            gl::ActiveTexture(gl::TEXTURE0);
         }
         // Draw with has_texture = true purely to enable attribute 2 (world pos).
         quad.draw(true, DrawMode::Triangles);

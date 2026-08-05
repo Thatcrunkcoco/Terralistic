@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::client::game::camera::Camera;
 use crate::client::game::gases::ClientGases;
 use crate::libraries::graphics as gfx;
-use crate::shared::blocks::RENDER_BLOCK_WIDTH;
+use crate::shared::blocks::{Blocks, RENDER_BLOCK_WIDTH};
 
 /// The maximum number of substance cells considered per frame, matching the
 /// overlay framework's budget so a huge zoomed-out view can't blow up cost.
@@ -41,6 +41,11 @@ pub struct SubstanceRenderer {
     /// frame for the visible region. Set to 0 until first render (GL context
     /// may not be current at construction time).
     field_texture: u32,
+    /// GPU solid-boundary mask (1 texel = 1 visible tile, R channel = 1 where
+    /// fluid sits against a solid block). Same dimensions as the field, created
+    /// once and re-uploaded per frame. The shader reads it to freeze the surface
+    /// wave (and stop fluid) at block edges.
+    block_mask_texture: u32,
     /// Region-quad buffers reused across frames.
     gas_quad: gfx::VertexBuffer,
     liquid_quad: gfx::VertexBuffer,
@@ -57,13 +62,18 @@ impl SubstanceRenderer {
         Self {
             time: gfx::SubstanceTime::new(),
             field_texture: 0,
+            block_mask_texture: 0,
             gas_quad: gfx::VertexBuffer::new(),
             liquid_quad: gfx::VertexBuffer::new(),
         }
     }
 
     /// Draws the visible substance region as a smooth, animated fluid field.
-    pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, camera: &Camera, gases: &ClientGases) -> Result<(), anyhow::Error> {
+    ///
+    /// `blocks` provides the solid terrain so fluids are masked out of (and stop
+    /// their wave animation against) solid blocks rather than spilling over
+    /// container walls.
+    pub fn render(&mut self, graphics: &mut gfx::GraphicsContext, camera: &Camera, gases: &ClientGases, blocks: &Blocks) -> Result<(), anyhow::Error> {
         let layer = gases.layer();
         let (world_w, world_h) = layer.get_size();
         if world_w == 0 || world_h == 0 {
@@ -87,6 +97,11 @@ impl SubstanceRenderer {
         let region_h = end_y - start_y;
 
         self.ensure_field_texture();
+
+        // Solid-boundary mask: 1 where the fluid sits against a solid block (so
+        // the wave freezes there). Built from the terrain BEFORE the fluid scan
+        // so both gas and liquid field buffers get clipped to open cells.
+        let solid_mask: Vec<u8> = Self::build_solid_mask(blocks, start_x, start_y, region_w, region_h);
 
         // Per-gas appearance cache (distinct gas ids are few — ~6 per world).
         let mut appearance: std::collections::HashMap<i32, GasAppearance> = std::collections::HashMap::new();
@@ -115,7 +130,9 @@ impl SubstanceRenderer {
                     let id = cell.gas.raw();
                     let app = appearance.entry(id).or_insert_with(|| gases.appearance(cell.gas));
 
-                    if app.renderable {
+                    if app.renderable && solid_mask[(out / 4) as usize] == 0 {
+                        // solid_mask == 1 means this cell is inside a solid block
+                        // (or its neighbor is): skip so no fluid paints over walls.
                         let c = app.color.set_a(FILL_ALPHA);
                         if app.liquid {
                             liquid_pixels[out] = c.r;
@@ -175,20 +192,75 @@ impl SubstanceRenderer {
             gfx::FloatPos(world_x1, world_y1),
         ];
 
+        // Upload the block mask once; both passes bind it on texture unit 1.
+        Self::upload_mask(self.block_mask_texture, &solid_mask, region_w, region_h);
+
         if has_liquid {
             Self::upload_field(self.field_texture, &liquid_pixels, region_w, region_h);
             self.liquid_quad.build_region_quad(screen_corners, world_corners);
             self.liquid_quad.upload();
-            graphics.render_field(&self.liquid_quad, self.field_texture, cell_size, tile_origin, field_size, time, true);
+            graphics.render_field(&self.liquid_quad, self.field_texture, self.block_mask_texture, cell_size, tile_origin, field_size, time, true);
         }
         if has_gas {
             Self::upload_field(self.field_texture, &gas_pixels, region_w, region_h);
             self.gas_quad.build_region_quad(screen_corners, world_corners);
             self.gas_quad.upload();
-            graphics.render_field(&self.gas_quad, self.field_texture, cell_size, tile_origin, field_size, time, false);
+            graphics.render_field(&self.gas_quad, self.field_texture, self.block_mask_texture, cell_size, tile_origin, field_size, time, false);
         }
 
         Ok(())
+    }
+
+    /// Builds a solid-boundary mask over the visible region: `1` where a cell is
+    /// a solid (non-ghost) block OR is orthogonally adjacent to one, `0`
+    /// elsewhere. The shader uses this to freeze the surface wave against walls
+    /// and the field scan uses it to skip painting fluid over solid cells. The
+    /// `1` ring around solid blocks guarantees the animated surface can't spill
+    /// past a container edge. Row-major, one byte per cell.
+    fn build_solid_mask(blocks: &Blocks, start_x: i32, start_y: i32, region_w: i32, region_h: i32) -> Vec<u8> {
+        let mut mask = vec![0u8; (region_w * region_h) as usize];
+        // Pass 1: mark solid cells themselves.
+        for y in 0..region_h {
+            for x in 0..region_w {
+                let wx = start_x + x;
+                let wy = start_y + y;
+                let solid = blocks
+                    .get_block_type_at(wx, wy)
+                    .map(|b| !b.ghost)
+                    .unwrap_or(false);
+                if solid {
+                    mask[(y * region_w + x) as usize] = 1;
+                }
+            }
+        }
+        // Pass 2: flood the orthogonal neighbors of solid cells so a one-tile ring
+        // around every wall also freezes (stops fluid spilling over the edge).
+        let mut ringed = mask.clone();
+        for y in 0..region_h {
+            for x in 0..region_w {
+                if mask[(y * region_w + x) as usize] == 1 {
+                    continue;
+                }
+                let near = (x > 0 && mask[(y * region_w + (x - 1)) as usize] == 1)
+                    || (x + 1 < region_w && mask[(y * region_w + (x + 1)) as usize] == 1)
+                    || (y > 0 && mask[((y - 1) * region_w + x) as usize] == 1)
+                    || (y + 1 < region_h && mask[((y + 1) * region_w + x) as usize] == 1);
+                if near {
+                    ringed[(y * region_w + x) as usize] = 1;
+                }
+            }
+        }
+        ringed
+    }
+
+    /// Uploads the solid-boundary mask (single channel, stored as RED) to the GPU
+    /// mask texture with LINEAR filtering so the dampening falls off smoothly at
+    /// the edges of the freeze zone.
+    fn upload_mask(texture: u32, mask: &[u8], w: i32, h: i32) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, texture);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, w, h, 0, gl::RED, gl::UNSIGNED_BYTE, mask.as_ptr().cast());
+        }
     }
 
     /// Uploads an RGBA field buffer (row-major, top-to-bottom) to the GPU field
@@ -211,6 +283,13 @@ impl SubstanceRenderer {
         unsafe {
             gl::GenTextures(1, &mut self.field_texture);
             gl::BindTexture(gl::TEXTURE_2D, self.field_texture);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+
+            gl::GenTextures(1, &mut self.block_mask_texture);
+            gl::BindTexture(gl::TEXTURE_2D, self.block_mask_texture);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);

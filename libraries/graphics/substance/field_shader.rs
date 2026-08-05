@@ -64,6 +64,7 @@ in vec2 v_uv;
 in vec2 v_tile;
 
 uniform sampler2D field_tex;
+uniform sampler2D block_mask;   // 1 = solid block / fluid-against-wall, 0 = open fluid
 uniform float time;
 uniform vec2  field_size;   // (cols, rows) tiles in the field texture
 uniform int   has_bubbles;
@@ -106,16 +107,24 @@ vec4 sampleField(vec2 uv) {
 }
 
 void main() {
+    // Solid-boundary mask: 1.0 where the fluid sits against a block (from the
+    // CPU-built 1-texel-per-tile solidity mask, bilinearly sampled so the
+    // dampening falls off smoothly). In open fluid this is 0 and the wave runs
+    // free; next to a wall it ramps to 1 and the surface freezes so the fluid
+    // stops at the container edge instead of undulating over the blocks.
+    float block = texture(block_mask, clamp(v_uv, 0.0, 1.0)).r;
+
     // Wavy fluid surface + gentle body undulation: displace the sample position
     // by smooth world-anchored sine octaves (in tile units). The dominant Y term
     // drives a travelling wave on the liquid top; the thinner X term and the
-    // second Y term add secondary ripple so it feels alive.
+    // second Y term add secondary ripple so it feels alive. The whole wave is
+    // scaled by (1 - block) so animation halts at solid boundaries.
     vec2 disp;
-    disp.x = 0.12 * sin(v_tile.y * 1.2 + time * 1.1)
-           + 0.08 * sin(v_tile.y * 3.1 - time * 1.4);
-    disp.y = 0.60 * sin(v_tile.x * 0.8 + time * 1.5)
-           + 0.38 * sin(v_tile.x * 2.1 - time * 2.0 + v_tile.y * 0.4)
-           + 0.20 * sin(v_tile.x * 4.5 + time * 2.6);
+    disp.x = (0.12 * sin(v_tile.y * 1.2 + time * 1.1)
+           +  0.08 * sin(v_tile.y * 3.1 - time * 1.4)) * (1.0 - block);
+    disp.y = (0.60 * sin(v_tile.x * 0.8 + time * 1.5)
+           +  0.38 * sin(v_tile.x * 2.1 - time * 2.0 + v_tile.y * 0.4)
+           +  0.20 * sin(v_tile.x * 4.5 + time * 2.6)) * (1.0 - block);
 
     vec2 sample_uv = v_uv + disp / max(field_size, vec2(1.0));
     vec4 field = sampleField(clamp(sample_uv, 0.0, 1.0));
@@ -168,6 +177,7 @@ pub struct FieldShader {
     pub program: u32,
     pub time: i32,
     pub field_tex: i32,
+    pub block_mask: i32,
     pub field_size: i32,
     pub has_bubbles: i32,
     pub cell_size: i32,
@@ -183,6 +193,7 @@ impl FieldShader {
 
         let time = unsafe { gl::GetUniformLocation(program, c"time".as_ptr().cast::<i8>()) };
         let field_tex = unsafe { gl::GetUniformLocation(program, c"field_tex".as_ptr().cast::<i8>()) };
+        let block_mask = unsafe { gl::GetUniformLocation(program, c"block_mask".as_ptr().cast::<i8>()) };
         let field_size = unsafe { gl::GetUniformLocation(program, c"field_size".as_ptr().cast::<i8>()) };
         let has_bubbles = unsafe { gl::GetUniformLocation(program, c"has_bubbles".as_ptr().cast::<i8>()) };
         let cell_size = unsafe { gl::GetUniformLocation(program, c"cell_size".as_ptr().cast::<i8>()) };
@@ -194,6 +205,6 @@ impl FieldShader {
         // here so a single VAO/VBO/EBO is reused across frames.
         let rect_vertex_buffer = VertexBuffer::new();
 
-        Ok(Self { program, time, field_tex, field_size, has_bubbles, cell_size, tile_origin, transform_matrix, rect_vertex_buffer })
+        Ok(Self { program, time, field_tex, block_mask, field_size, has_bubbles, cell_size, tile_origin, transform_matrix, rect_vertex_buffer })
     }
 }
