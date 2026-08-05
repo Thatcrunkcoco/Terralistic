@@ -106,7 +106,12 @@ impl Overlay {
     }
 
     /// Whether the overlay is currently open.
+    ///
+    /// Kept as public API even though live gas data is now streamed unconditionally
+    /// for the always-on substance renderer; the overlay's open state still gates
+    /// its own gray-wash debug view and is a legitimate read for future views.
     #[must_use]
+    #[allow(dead_code)] // used by future overlay views / tests; kept as public accessor
     pub const fn is_open(&self) -> bool {
         self.open
     }

@@ -12,6 +12,7 @@ mod framerate_measurer;
 mod gas_overlay;
 mod gases;
 mod overlay;
+mod substance;
 mod health;
 mod inventory;
 mod items;

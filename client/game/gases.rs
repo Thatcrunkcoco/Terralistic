@@ -121,6 +121,34 @@ impl ClientGases {
         &self.layer
     }
 
+    /// Resolves everything the always-on substance renderer needs for one gas id
+    /// in a single registry lock: whether it's drawable, whether it's a liquid,
+    /// and its base color. The renderer caches this per distinct id per frame so
+    /// it doesn't re-lock the registry for every visible cell.
+    ///
+    /// * **renderable** — skips vacuum (`NONE`) and plain "air": air fills most of
+    ///   the world, so drawing it would just flood the screen with one tint.
+    /// * **liquid** — density >= 500.0, matching the test world (gases ~1–2,
+    ///   liquids 1000+), so dense substances render as solid bubbling bodies
+    ///   rather than soft roiling gas.
+    ///
+    /// Lives here (rather than in the renderer) because color selection and the
+    /// registry live under `gases`; the renderer just consumes the resolved data.
+    #[must_use]
+    pub fn appearance(&self, gas: GasId) -> crate::client::game::substance::GasAppearance {
+        let color = self.color_for_gas(gas);
+        let (renderable, liquid) = if gas.is_none() {
+            (false, false)
+        } else {
+            let gases = self.gases.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match gases.get_gas_type(gas) {
+                Ok(t) => (t.name != "air", t.density >= 500.0),
+                Err(_) => (false, false),
+            }
+        };
+        crate::client::game::substance::GasAppearance { renderable, liquid, color }
+    }
+
     /// Returns the list of registered gas types with their overlay colors, in
     /// registration order. This drives the ONI-style legend shown next to the
     /// gas overlay so the player can map each color to a gas at a glance. The

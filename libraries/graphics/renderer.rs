@@ -12,6 +12,7 @@ use crate::libraries::graphics::blur::BlurContext;
 use crate::libraries::graphics::events::sdl_event_to_gfx_event;
 use crate::libraries::graphics::passthrough_shader::PassthroughShader;
 use crate::libraries::graphics::shadow::ShadowContext;
+use crate::libraries::graphics::substance::SubstanceShader;
 use crate::libraries::graphics::transformation::Transformation;
 use crate::libraries::graphics::Font;
 
@@ -27,6 +28,7 @@ pub struct GraphicsContext {
     window_framebuffer: u32,
     blur_context: BlurContext,
     pub(super) passthrough_shader: PassthroughShader,
+    pub(super) substance_shader: SubstanceShader,
     events_queue: VecDeque<gfx::Event>,
     window_open: bool,
     // Keep track of all Key states as a hashmap
@@ -79,6 +81,7 @@ impl GraphicsContext {
         gfx::set_blend_mode(gfx::BlendMode::Alpha);
 
         let passthrough_shader = PassthroughShader::new()?;
+        let substance_shader = SubstanceShader::new()?;
         let mut window_texture = 0;
         let mut window_texture_back = 0;
         let mut window_framebuffer = 0;
@@ -109,6 +112,7 @@ impl GraphicsContext {
             events: Vec::new(),
             blur_context: BlurContext::new()?,
             passthrough_shader,
+            substance_shader,
             shadow_context,
             events_queue: VecDeque::new(),
             window_open: true,

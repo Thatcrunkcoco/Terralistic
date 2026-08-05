@@ -14,6 +14,7 @@ use crate::client::game::framerate_measurer::FramerateMeasurer;
 use crate::client::game::gas_overlay::GasOverlayProvider;
 use crate::client::game::gases::ClientGases;
 use crate::client::game::overlay::Overlay;
+use crate::client::game::substance::SubstanceRenderer;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
 use crate::client::game::items::ClientItems;
@@ -114,6 +115,7 @@ pub fn run_game(
     let mut pause_menu = PauseMenu::new(graphics, settings.clone(), global_settings.clone());
     let mut debug_menu = DebugMenu::new();
     let mut gas_overlay = Overlay::new(debug);
+    let mut substance_renderer = SubstanceRenderer::new();
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -176,6 +178,10 @@ pub fn run_game(
         background.render(graphics, &camera);
         walls.render(graphics, &camera, &frame_timer)?;
         blocks.render(graphics, &camera /*&frame_timer*/)?;
+        // Draw the always-on procedural substance layer (gases + liquids) right
+        // after the terrain, before players/items/HUD, so fluids sit beneath
+        // entities like a cartoony backdrop of roiling gas and bubbling liquid.
+        substance_renderer.render(graphics, &camera, &gases)?;
         // Draw the gas overlay immediately after the terrain (background/walls/
         // blocks) but before players/items/HUD, so its gray wash only desaturates
         // the world and the gas cells remain the focus while entities stay readable.
@@ -237,10 +243,12 @@ pub fn run_game(
             respawn_screen.on_event(&event, graphics, &mut networking)?;
         }
 
-        // Keep the server's live gas snapshots in sync with the overlay's
-        // visibility (G hotkey toggles don't consume the click event, so this is
-        // reconciled every frame rather than only on the toggle's own path).
-        gases.request_live_updates(gas_overlay.is_open(), &mut networking)?;
+        // Keep the server's live gas snapshots flowing. The always-on substance
+        // renderer needs fresh layer data every tick to show roiling gas and
+        // bubbling liquid, so live updates are requested unconditionally while
+        // the world is open (the G-hotkey debug overlay is an additional view on
+        // the same data, not the only consumer of it).
+        gases.request_live_updates(true, &mut networking)?;
 
         framerate_measurer.update_post_render();
 
