@@ -71,6 +71,11 @@ uniform int   has_bubbles;
 
 layout(location = 0) out vec4 color;
 
+// Cartoon outline band width (in field-alpha space): where the feathered field
+// alpha passes through this window, a chunky cel outline is drawn. Declared at
+// module scope so both the color pass and the opaque-outline-alpha pass agree.
+const float OUTLINE_WIDTH = 0.18;
+
 float wobble(vec2 p, float t) {
     vec2 q = p;
     float w = 0.0;
@@ -160,9 +165,38 @@ void main() {
         // brightness — the vivid cartoony water/magma look.
         float lum = dot(final, vec3(0.299, 0.587, 0.114));
         final = mix(vec3(lum), final, 1.30) * 1.15;
+
+        // ---- Cartoon cel treatment (liquid only; gas stays faint/milky) ----
+        // 1) Outlined body: the feathered blur of `field.a` (1 inside, ~0 outside)
+        //    lets us catch the boundary band and paint a chunky dark outline, the
+        //    CotL / Paper-Mario style border around every liquid body.
+        vec3 outline_color = vec3(0.05, 0.03, 0.10);   // near-black plum
+        float edge = smoothstep(0.0, OUTLINE_WIDTH, field.a)
+                   * smoothstep(1.0, 1.0 - OUTLINE_WIDTH, field.a);
+        final = mix(final, outline_color, edge);
+
+        // 2) Cel-shaded flat bands: quantize luminance into a couple of bright
+        //    flats (with roil adding variety) so the body reads shaded cartoon
+        //    rather than a smooth gradient — pure Paper Mario.
+        float cel_lum = dot(final, vec3(0.299, 0.587, 0.114));
+        float band = floor(cel_lum * 3.0 + 0.5) / 3.0;   // 3 flat levels
+        final = final * (band / max(cel_lum, 1e-4));
+
+        // 3) Specular pearl: a soft world-anchored highlight nudged toward the
+        //    upper surface, clipped to the filled body so only the top reads wet.
+        float pearl = 0.5 + 0.5 * sin(v_tile.x * 6.0 + time * 1.8);
+        pearl *= smoothstep(0.55, 0.95, 1.0 - field.a);   // live near the upper edge
+        final += vec3(pearl * 0.45);
     }
 
     float alpha = field.a * clamp(0.94 + roil * 0.12, 0.0, 1.0);
+    // The cel outline should be fully opaque where it sits, so it edges the body
+    // crisply instead of letting the background bleed through the band.
+    if (has_bubbles == 1) {
+        float oedge = smoothstep(0.0, OUTLINE_WIDTH, field.a)
+                    * smoothstep(1.0, 1.0 - OUTLINE_WIDTH, field.a);
+        alpha = max(alpha, oedge);
+    }
     color = vec4(final, alpha);
 }
 ";
