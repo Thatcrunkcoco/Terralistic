@@ -96,39 +96,47 @@ impl SubstanceRenderer {
         let mut gas_pixels: Vec<u8> = vec![0; (region_w * region_h * 4) as usize];
         let mut liquid_pixels: Vec<u8> = vec![0; (region_w * region_h * 4) as usize];
 
+        // Hot path: iterate the dense cell array directly (flat index instead of
+        // per-cell translate_coords + Result). Coords are already clamped to
+        // world bounds above, and cells() is row-major over (x * height + y), so
+        // this index math is exact. Precompute the base pointer once for speed.
+        let cells = layer.cells();
+        let map_h = world_h as i32; // map height (size.1) — dense row stride
         let mut scanned = 0usize;
         'outer: for y in start_y..end_y {
-            for x in start_x..end_x {
-                let cell = match layer.get_cell(x, y) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        scanned += 1;
-                        continue;
-                    }
-                };
-                let id = cell.gas.raw();
-                let app = appearance.entry(id).or_insert_with(|| gases.appearance(cell.gas));
+            let mut src = (start_x * map_h + y) as isize;
+            // Output buffer offset for this row ((y - start_y) * region_w * 4).
+            let mut out = ((y - start_y) * region_w * 4) as usize;
+            for _x in start_x..end_x {
+                // cannot panic: coords clamped to world bounds above
+                #[allow(clippy::indexing_slicing)]
+                {
+                    let cell = cells[src as usize];
+                    let id = cell.gas.raw();
+                    let app = appearance.entry(id).or_insert_with(|| gases.appearance(cell.gas));
 
-                if app.renderable {
-                    let c = app.color.set_a(FILL_ALPHA);
-                    let idx = (((y - start_y) * region_w + (x - start_x)) * 4) as usize;
-                    if app.liquid {
-                        liquid_pixels[idx] = c.r;
-                        liquid_pixels[idx + 1] = c.g;
-                        liquid_pixels[idx + 2] = c.b;
-                        liquid_pixels[idx + 3] = c.a;
-                    } else {
-                        gas_pixels[idx] = c.r;
-                        gas_pixels[idx + 1] = c.g;
-                        gas_pixels[idx + 2] = c.b;
-                        gas_pixels[idx + 3] = c.a;
+                    if app.renderable {
+                        let c = app.color.set_a(FILL_ALPHA);
+                        if app.liquid {
+                            liquid_pixels[out] = c.r;
+                            liquid_pixels[out + 1] = c.g;
+                            liquid_pixels[out + 2] = c.b;
+                            liquid_pixels[out + 3] = c.a;
+                        } else {
+                            gas_pixels[out] = c.r;
+                            gas_pixels[out + 1] = c.g;
+                            gas_pixels[out + 2] = c.b;
+                            gas_pixels[out + 3] = c.a;
+                        }
+                    }
+
+                    scanned += 1;
+                    if scanned >= MAX_SUBSTANCE_CELLS {
+                        break 'outer;
                     }
                 }
-
-                scanned += 1;
-                if scanned >= MAX_SUBSTANCE_CELLS {
-                    break 'outer;
-                }
+                src += map_h as isize; // dense: x step jumps by map height
+                out += 4;              // output texel stride (RGBA)
             }
         }
 

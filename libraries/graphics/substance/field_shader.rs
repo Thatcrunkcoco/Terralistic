@@ -82,15 +82,21 @@ float wobble(vec2 p, float t) {
 /// Multi-tap gaussian sample of the field. The field is 1 texel per tile, so a
 /// single bilinear sample leaves hard block edges (the \"blocky\" look). Blurring
 /// the field across neighboring texels turns the blocky staircase into soft,
-/// smooth, gooey contours. A 5x5 kernel with radius ~2 texels (= 2 blocks) keeps
-/// interiors of large bodies flat while roundly feathering every boundary.
+/// smooth, gooey contours.
+///
+/// Used to be a 5x5 kernel (25 taps) but that's the single hottest part of the
+/// fragment shader — every visible pixel sampled 25 neighboring texels, twice
+/// (gas + liquid passes), which is what spun the GPU fans up. The bilinear
+/// filter already does the coarse smoothing of tile steps, so a tight 3x3
+/// gaussian (9 taps) still melts the blocky staircase into soft gooey contours
+/// while cutting per-pixel texture traffic ~2.8x.
 vec4 sampleField(vec2 uv) {
     vec2 step = 1.0 / max(field_size, vec2(1.0));
-    float wg[5] = float[](0.05, 0.25, 0.4, 0.25, 0.05);
+    float wg[3] = float[](0.25, 0.5, 0.25);
     vec4 acc = vec4(0.0);
     float total = 0.0;
-    for (int i = -2; i <= 2; i++) {
-        for (int j = -2; j <= 2; j++) {
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
             float w = wg[abs(i)] * wg[abs(j)];
             acc += texture(field_tex, uv + vec2(float(i) * step.x, float(j) * step.y)) * w;
             total += w;
