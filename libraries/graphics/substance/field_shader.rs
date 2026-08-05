@@ -120,24 +120,36 @@ void main() {
     vec2 sample_uv = v_uv + disp / max(field_size, vec2(1.0));
     vec4 field = sampleField(clamp(sample_uv, 0.0, 1.0));
 
-    vec2 cell = floor(v_tile);
-    float phase = hash21(cell);
     float roil = wobble(v_tile * 0.35, time);
-    float bright = 0.85 + roil * 0.15;
 
+    // Gases stay faint and milky; liquids run the *same* smooth mechanics but get
+    // a stronger base so water/magma pop as vivid, saturated bodies.
+    float bright = (has_bubbles == 1) ? (1.06 + roil * 0.18) : (0.85 + roil * 0.15);
+
+    // Continuous, non-quantized motes so neither gas nor liquid ever snaps to a
+    // per-tile grid (the old integer-cell hash was what made liquid chunk).
     float mote = 0.0;
     if (has_bubbles == 1) {
-        float rise = fract(hash21(cell + floor(vec2(-time * 0.4, time * 0.5))));
-        float m1 = smoothstep(0.0, 0.05, hash21(cell + vec2(time * 0.1)));
-        mote = pow(m1 * rise, 3.0) * 1.6;
+        // Thicker liquid: soft lobed bubbles drifting upward on smooth coords.
+        vec2 bp = v_tile * 2.1 - vec2(0.0, time * 0.7);
+        float b1 = 0.5 + 0.5 * sin(wobble(bp, time * 1.2) * 6.2831 + time * 0.8);
+        float b2 = 0.5 + 0.5 * sin(wobble(bp + vec2(3.1, 1.7), time * 0.9) * 6.2831 - time * 0.6);
+        mote = pow(max(b1, b2), 3.0) * 1.05;
     } else {
+        // Faint gas sparkle, exactly as before (long-wavelength, smooth).
         float m2 = hash21(floor(v_tile * 0.5) + vec2(time * 0.05));
         mote = smoothstep(0.96, 1.0, m2) * 0.25;
     }
 
-    float alpha = field.a * clamp(0.94 + roil * 0.12, 0.0, 1.0);
     vec3 final = field.rgb * bright + vec3(mote, mote * 0.82, mote * 0.6);
+    if (has_bubbles == 1) {
+        // Push liquid color away from gray (more saturated) and add a touch more
+        // brightness — the vivid cartoony water/magma look.
+        float lum = dot(final, vec3(0.299, 0.587, 0.114));
+        final = mix(vec3(lum), final, 1.30) * 1.15;
+    }
 
+    float alpha = field.a * clamp(0.94 + roil * 0.12, 0.0, 1.0);
     color = vec4(final, alpha);
 }
 ";
