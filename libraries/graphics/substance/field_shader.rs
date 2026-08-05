@@ -74,7 +74,7 @@ layout(location = 0) out vec4 color;
 // Cartoon outline band width (in field-alpha space): where the feathered field
 // alpha passes through this window, a chunky cel outline is drawn. Declared at
 // module scope so both the color pass and the opaque-outline-alpha pass agree.
-const float OUTLINE_WIDTH = 0.18;
+const float OUTLINE_WIDTH = 0.06;
 
 float wobble(vec2 p, float t) {
     vec2 q = p;
@@ -169,17 +169,23 @@ void main() {
         // ---- Cartoon cel treatment (liquid only; gas stays faint/milky) ----
         // 1) Outlined body: the feathered blur of `field.a` (1 inside, ~0 outside)
         //    lets us catch the boundary band and paint a chunky dark outline, the
-        //    CotL / Paper-Mario style border around every liquid body.
-        vec3 outline_color = vec3(0.05, 0.03, 0.10);   // near-black plum
+        //    CotL / Paper-Mario style border around every liquid body. The outline
+        //    is a *dark tint of the fluid itself* (not pure black) so liquids stay
+        //    colorful right up to the edge instead of a big black ring.
+        vec3 outline_color = mix(final, vec3(0.0), 0.55) * 1.1;
         float edge = smoothstep(0.0, OUTLINE_WIDTH, field.a)
                    * smoothstep(1.0, 1.0 - OUTLINE_WIDTH, field.a);
         final = mix(final, outline_color, edge);
 
-        // 2) Cel-shaded flat bands: quantize luminance into a couple of bright
-        //    flats (with roil adding variety) so the body reads shaded cartoon
-        //    rather than a smooth gradient — pure Paper Mario.
+        // 2) Cel-shaded flat bands: quantize luminance into TWO bright flat
+        //    levels (never a near-black band) so the body reads shaded cartoon
+        //    without crushing most of the color into darkness. Squaring the
+        //    luminance lifts mid-tones toward bright before the hard split.
         float cel_lum = dot(final, vec3(0.299, 0.587, 0.114));
-        float band = floor(cel_lum * 3.0 + 0.5) / 3.0;   // 3 flat levels
+        float level = clamp(cel_lum, 0.0, 1.0);
+        level = level * level;                       // lift mid-tones toward bright
+        float band = smoothstep(0.42, 0.42, level);  // hard 2-level split
+        band = 0.68 + 0.32 * band;                   // {0.68, 1.00} — never dark
         final = final * (band / max(cel_lum, 1e-4));
 
         // 3) Specular pearl: a soft world-anchored highlight nudged toward the
