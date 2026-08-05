@@ -70,12 +70,6 @@ uniform int   has_bubbles;
 
 layout(location = 0) out vec4 color;
 
-float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-
 float wobble(vec2 p, float t) {
     vec2 q = p;
     float w = 0.0;
@@ -136,9 +130,13 @@ void main() {
         float b2 = 0.5 + 0.5 * sin(wobble(bp + vec2(3.1, 1.7), time * 0.9) * 6.2831 - time * 0.6);
         mote = pow(max(b1, b2), 3.0) * 1.05;
     } else {
-        // Faint gas sparkle, exactly as before (long-wavelength, smooth).
-        float m2 = hash21(floor(v_tile * 0.5) + vec2(time * 0.05));
-        mote = smoothstep(0.96, 1.0, m2) * 0.25;
+        // Faint gas sparkle — non-quantized continuous noise (the fluid-style
+        // fix) so no per-tile grid ever snaps. Two fine lobes of soft banding,
+        // kept low amplitude so gas stays faint and milky.
+        vec2 gp = v_tile * 0.9 + vec2(time * 0.04, -time * 0.02);
+        float n1 = 0.5 + 0.5 * sin(wobble(gp, time * 0.5) * 6.2831 + time * 0.6);
+        float n2 = 0.5 + 0.5 * sin(wobble(gp + vec2(3.1, 1.7), time * 0.4) * 6.2831 - time * 0.5);
+        mote = pow(max(n1, n2), 5.0) * 0.35;
     }
 
     vec3 final = field.rgb * bright + vec3(mote, mote * 0.82, mote * 0.6);
