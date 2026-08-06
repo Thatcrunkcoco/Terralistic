@@ -32,6 +32,11 @@ pub struct GraphicsContext {
     pub(super) passthrough_shader: PassthroughShader,
     pub(super) substance_shader: SubstanceShader,
     pub(super) field_shader: FieldShader,
+    pub(super) cartoon_outline: gfx::CartoonOutlineShader,
+    /// Toggle for the cartoon cel-outline post-process. When disabled the scene
+    /// is presented with a plain blit (the original pixel look), which is handy
+    /// for A/B comparison and for users who prefer the classic Terraria style.
+    cartoon_enabled: bool,
     events_queue: VecDeque<gfx::Event>,
     window_open: bool,
     // Keep track of all Key states as a hashmap
@@ -86,6 +91,7 @@ impl GraphicsContext {
         let passthrough_shader = PassthroughShader::new()?;
         let substance_shader = SubstanceShader::new()?;
         let field_shader = FieldShader::new()?;
+        let cartoon_outline = gfx::CartoonOutlineShader::new()?;
         let mut window_texture = 0;
         let mut window_texture_back = 0;
         let mut window_framebuffer = 0;
@@ -118,6 +124,8 @@ impl GraphicsContext {
             passthrough_shader,
             substance_shader,
             field_shader,
+            cartoon_outline,
+            cartoon_enabled: true,
             shadow_context,
             events_queue: VecDeque::new(),
             window_open: true,
@@ -257,43 +265,21 @@ impl GraphicsContext {
         self.normalization_transform.translate(gfx::FloatPos(-1.0, 1.0));
         self.normalization_transform.stretch((2.0 / self.get_window_size().0, -2.0 / self.get_window_size().1));
 
+        // The scene has been rendered into `window_texture` (attached to
+        // `window_framebuffer`) by the world. Present it to the window: through
+        // the cartoon cel-outline post-process when enabled (the CoTL / Paper-
+        // Mario look), or with a plain blit when disabled (classic pixel art).
         unsafe {
-            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.window_framebuffer);
-            gl::FramebufferTexture2D(gl::READ_FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, self.window_texture, 0);
             gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+            gl::Viewport(0, 0, self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
+        }
 
-            #[cfg(target_os = "windows")]
-            {
-                gl::BlitFramebuffer(
-                    0,
-                    0,
-                    (self.get_window_size().0 * 2.0) as i32,
-                    (self.get_window_size().1 * 2.0) as i32,
-                    0,
-                    0,
-                    (self.get_window_size().0 * 2.0) as i32,
-                    (self.get_window_size().1 * 2.0) as i32,
-                    gl::COLOR_BUFFER_BIT,
-                    gl::NEAREST,
-                );
-            }
-            #[cfg(target_os = "macos")]
-            {
-                gl::BlitFramebuffer(
-                    0,
-                    0,
-                    (self.get_window_size().0 * 2.0) as i32,
-                    (self.get_window_size().1 * 2.0) as i32,
-                    0,
-                    0,
-                    (self.get_window_size().0 * 2.0) as i32,
-                    (self.get_window_size().1 * 2.0) as i32,
-                    gl::COLOR_BUFFER_BIT,
-                    gl::NEAREST,
-                );
-            }
-            #[cfg(target_os = "linux")]
-            {
+        if self.cartoon_enabled {
+            self.cartoon_outline.render(self, self.window_texture, self.sdl_window.size().0, self.sdl_window.size().1);
+        } else {
+            unsafe {
+                gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.window_framebuffer);
+                gl::FramebufferTexture2D(gl::READ_FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, self.window_texture, 0);
                 gl::BlitFramebuffer(
                     0,
                     0,
@@ -426,6 +412,18 @@ impl GraphicsContext {
 
     pub fn enable_blur(&mut self, enable: bool) {
         self.blur_context.blur_enabled = enable;
+    }
+
+    /// Toggles the cartoon cel-outline post-process (Paper-Mario / Cult-of-the-
+    /// Lamb look). When disabled, the scene presents with a plain pixel blit.
+    pub fn enable_cartoon(&mut self, enable: bool) {
+        self.cartoon_enabled = enable;
+    }
+
+    /// Returns whether the cartoon cel-outline post-process is currently enabled.
+    #[must_use]
+    pub const fn cartoon_enabled(&self) -> bool {
+        self.cartoon_enabled
     }
 
     pub fn set_fps_limit(&mut self, fps: f32) {

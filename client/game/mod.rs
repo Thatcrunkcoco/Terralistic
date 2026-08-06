@@ -20,6 +20,7 @@ mod lights;
 mod mod_manager;
 mod networking;
 mod pause_menu;
+mod player_body;
 mod players;
 pub mod private_world;
 mod respawn_screen;

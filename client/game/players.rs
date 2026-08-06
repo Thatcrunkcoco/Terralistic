@@ -7,6 +7,7 @@ use crate::libraries::events::Event;
 use crate::libraries::graphics as gfx;
 use crate::shared::blocks::{Blocks, BLOCK_WIDTH, RENDER_BLOCK_WIDTH, RENDER_SCALE};
 use crate::shared::entities::{Entities, EntityDespawnEvent, HealthComponent, PhysicsComponent, PositionComponent};
+use super::player_body::draw_player;
 use crate::shared::mod_manager::ModManager;
 use crate::shared::packet::Packet;
 use crate::shared::players::{
@@ -17,6 +18,9 @@ pub struct ClientPlayers {
     main_player: Option<Entity>,
     main_player_name: String,
     player_texture: gfx::Texture,
+    player_colors: super::player_body::PlayerColors,
+    procedural_player: bool,
+    animation_start: std::time::Instant,
     waiting_for_player: bool,
     pub controls_enabled: bool,
 }
@@ -27,6 +31,9 @@ impl ClientPlayers {
             main_player: None,
             main_player_name: player_name.to_owned(),
             player_texture: gfx::Texture::new(),
+            player_colors: super::player_body::PlayerColors::fallback(),
+            procedural_player: true,
+            animation_start: std::time::Instant::now(),
             controls_enabled: true,
             waiting_for_player: true,
         }
@@ -46,6 +53,10 @@ impl ClientPlayers {
 
             *color = *player_surface.get_pixel(gfx::IntPos(x, y))?;
         }
+
+        // Sample the flat palette colors that drive the procedural paper-doll
+        // body from the (already palette-remapped) standing frame.
+        self.player_colors = super::player_body::sample_colors(&template_surface);
 
         self.player_texture = gfx::Texture::load_from_surface(&template_surface);
 
@@ -109,21 +120,39 @@ impl ClientPlayers {
     }
 
     pub fn render(&self, graphics: &gfx::GraphicsContext, entities: &mut Entities, camera: &Camera) {
-        for (_, (position, player_component)) in entities.ecs.query_mut::<(&PositionComponent, &PlayerComponent)>() {
-            let x = position.x() * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).0 * RENDER_BLOCK_WIDTH;
-            let y = position.y() * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).1 * RENDER_BLOCK_WIDTH;
-
-            let src_rect = gfx::Rect::new(
-                gfx::FloatPos(player_component.animation_frame as f32 * PLAYER_WIDTH * BLOCK_WIDTH, 0.0),
-                gfx::FloatSize(PLAYER_WIDTH * BLOCK_WIDTH, PLAYER_HEIGHT * BLOCK_WIDTH),
-            );
+        let anim_time = self.animation_start.elapsed().as_secs_f32();
+        for (_, (position, player_component, physics)) in entities.ecs.query_mut::<(&PositionComponent, &PlayerComponent, &PhysicsComponent)>() {
+            let top_x = position.x() * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).0 * RENDER_BLOCK_WIDTH;
+            let top_y = position.y() * RENDER_BLOCK_WIDTH - camera.get_top_left(graphics).1 * RENDER_BLOCK_WIDTH;
 
             let flipped = match player_component.direction {
                 Direction::Left => true,
                 Direction::Right => false,
             };
 
-            self.player_texture.render(graphics, RENDER_SCALE, gfx::FloatPos(x.round(), y.round()), Some(src_rect), flipped, None);
+            if self.procedural_player {
+                // Feet sit at the bottom of the player's collision box
+                // (position.y + PLAYER_HEIGHT blocks), on the ground.
+                let feet = gfx::FloatPos(
+                    top_x + PLAYER_WIDTH * RENDER_BLOCK_WIDTH * 0.5,
+                    top_y + PLAYER_HEIGHT * RENDER_BLOCK_WIDTH,
+                );
+                draw_player(
+                    graphics,
+                    feet,
+                    physics.velocity_x,
+                    physics.velocity_y,
+                    anim_time,
+                    flipped,
+                    &self.player_colors,
+                );
+            } else {
+                let src_rect = gfx::Rect::new(
+                    gfx::FloatPos(player_component.animation_frame as f32 * PLAYER_WIDTH * BLOCK_WIDTH, 0.0),
+                    gfx::FloatSize(PLAYER_WIDTH * BLOCK_WIDTH, PLAYER_HEIGHT * BLOCK_WIDTH),
+                );
+                self.player_texture.render(graphics, RENDER_SCALE, gfx::FloatPos(top_x.round(), top_y.round()), Some(src_rect), flipped, None);
+            }
         }
     }
 
@@ -173,6 +202,19 @@ impl ClientPlayers {
 
     pub const fn get_main_player(&self) -> Option<Entity> {
         self.main_player
+    }
+
+    /// Toggles between the procedural paper-doll body and the original
+    /// sprite-sheet animation (useful for A/B comparison). Intended as public
+    /// API for an in-game toggle; not yet bound to the debug menu.
+    #[allow(dead_code)]
+    pub fn set_procedural_player(&mut self, enabled: bool) {
+        self.procedural_player = enabled;
+    }
+
+    #[allow(dead_code)]
+    pub const fn procedural_player(&self) -> bool {
+        self.procedural_player
     }
 
     pub const fn is_waiting_for_player(&self) -> bool {
