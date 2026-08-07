@@ -15,6 +15,7 @@ use crate::client::game::gas_overlay::GasOverlayProvider;
 use crate::client::game::gases::ClientGases;
 use crate::client::game::overlay::Overlay;
 use crate::client::game::substance::SubstanceRenderer;
+use crate::client::game::zombies::ClientZombies;
 use crate::client::game::health::ClientHealth;
 use crate::client::game::inventory::ClientInventory;
 use crate::client::game::items::ClientItems;
@@ -116,6 +117,7 @@ pub fn run_game(
     let mut debug_menu = DebugMenu::new();
     let mut gas_overlay = Overlay::new(debug);
     let mut substance_renderer = SubstanceRenderer::new();
+    let mut zombies = ClientZombies::new();
     let mut framerate_measurer = FramerateMeasurer::new();
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
@@ -131,6 +133,7 @@ pub fn run_game(
     items.load_resources(&mods.mod_manager)?;
     camera.load_resources(graphics);
     players.load_resources(&mods.mod_manager)?;
+    zombies.load_resources(&mods.mod_manager)?;
     health.load_resources(&mods.mod_manager)?;
 
     pause_menu.init(graphics);
@@ -169,6 +172,7 @@ pub fn run_game(
             players.controls_enabled = !camera.is_detached();
             players.update(graphics, &mut entities.get_entities(), &mut networking, &blocks.get_blocks())?;
             entities.get_entities().update_entities_ms(&blocks.get_blocks(), &mut events)?;
+            zombies.update(&mut entities.get_entities())?;
         }
 
         respawn_screen.is_shown = players.get_main_player().is_none() && !players.is_waiting_for_player();
@@ -188,6 +192,7 @@ pub fn run_game(
         gas_overlay.render(graphics, &camera, &GasOverlayProvider::new(&gases))?;
         players.render(graphics, &mut entities.get_entities(), &camera);
         items.render(graphics, &camera, &mut entities.get_entities())?;
+        zombies.render(graphics, &camera, &mut entities.get_entities())?;
         floating_text.render(graphics, &camera);
         lights.render(graphics, &camera, &blocks.get_blocks(), settings, &frame_timer)?;
         camera.render(graphics);
@@ -230,6 +235,7 @@ pub fn run_game(
             walls.on_event(&event)?;
             gases.on_event(&event)?;
             entities.on_event(&event, &mut events, &players, &mut networking)?;
+            zombies.on_event(&event, &mut entities.get_entities())?;
             items.on_event(&event, &mut entities.get_entities(), &mut events)?;
             block_selector.on_event(graphics, &mut networking, &camera, &event, &mut events)?;
             players.on_event(&event, &mut entities.get_entities())?;

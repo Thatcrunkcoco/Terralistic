@@ -1,4 +1,4 @@
-pub use core_server::{print_to_console, send_to_ui, Server, MULTIPLAYER_PORT, SINGLEPLAYER_PORT};
+﻿pub use core_server::{print_to_console, send_to_ui, Server, MULTIPLAYER_PORT, SINGLEPLAYER_PORT};
 
 mod blocks;
 mod chat;
@@ -11,4 +11,5 @@ mod mod_manager;
 mod networking;
 mod players;
 mod walls;
+mod zombies;
 mod world_generator;

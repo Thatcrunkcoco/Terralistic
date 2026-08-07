@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
 use hecs::Entity;
@@ -334,3 +334,111 @@ impl rlua::FromLua<'_> for EntityId {
 
 /// make `EntityId` Lua compatible
 impl rlua::UserData for EntityId {}
+
+/// Identifies what kind of non-player entity an `EntitySpawnPacket` refers to,
+/// so the client knows which renderer/lifecycle to attach.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum EntityKind {
+    Zombie,
+}
+
+/// Sent by the server when a non-player entity (e.g. a zombie) is spawned, so
+/// the client can create the matching local entity. Without this the client
+/// cannot look up the id that subsequent `EntityPositionVelocityPacket`s
+/// reference.
+#[derive(Serialize, Deserialize)]
+pub struct EntitySpawnPacket {
+    pub id: EntityId,
+    pub x: f32,
+    pub y: f32,
+    pub kind: EntityKind,
+}
+
+/// Size of a zombie's collision box, in blocks. Matches the player so it feels
+/// like a peer entity: 2 blocks wide, 3 blocks tall.
+pub const ZOMBIE_WIDTH: f32 = 2.0;
+pub const ZOMBIE_HEIGHT: f32 = 3.0;
+
+/// Horizontal walk speed, in blocks per second. Server-authoritative; the client
+/// only derives facing from the synced velocity.
+pub const ZOMBIE_MAX_SPEED: f32 = 1.5;
+
+/// Walking direction of a zombie. Mirrors the player's `Direction` so the client
+/// can flip the sprite, but kept independent to avoid coupling to player code.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ZombieDirection {
+    Left,
+    Right,
+}
+
+/// Marker component for a walking zombie. The client identifies zombies by
+/// querying for this component; position/physics reuse the generic machinery.
+pub struct ZombieComponent {
+    direction: ZombieDirection,
+    /// Local frame counter used to advance the walk animation. Not networked;
+    /// each side advances it consistently with wall-clock time via delta_time.
+    pub animation_progress: f32,
+}
+
+impl ZombieComponent {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            direction: ZombieDirection::Right,
+            animation_progress: 0.0,
+        }
+    }
+
+    #[must_use]
+    pub const fn get_direction(&self) -> ZombieDirection {
+        self.direction
+    }
+
+    pub fn set_direction(&mut self, direction: ZombieDirection) {
+        self.direction = direction;
+    }
+}
+
+/// Spawns a zombie entity at the given world coords (in blocks) and assigns it a
+/// fresh id. Returns the spawned entity.
+pub fn spawn_zombie(entities: &mut Entities, x: f32, y: f32) -> Result<hecs::Entity> {
+    let entity = entities.ecs.spawn((
+        PositionComponent::new(x, y),
+        PhysicsComponent::new(ZOMBIE_WIDTH, ZOMBIE_HEIGHT),
+        ZombieComponent::new(),
+    ));
+
+    let id = entities.new_id();
+    entities.assign_id(entity, id)?;
+    Ok(entity)
+}
+
+/// Advances every zombie for one server tick (delta_time in seconds): sets
+/// horizontal velocity toward its facing and flips at the world's horizontal
+/// edges so it walks back and forth. Gravity is handled by the physics step.
+pub fn update_zombies_ms(entities: &mut Entities, blocks: &Blocks, delta_time: f32) {
+    let world_width = blocks.get_size().0 as f32;
+    let mut to_flip = Vec::new();
+    for (entity, (position, zombie, physics)) in entities.ecs.query_mut::<(&PositionComponent, &mut ZombieComponent, &mut PhysicsComponent)>() {
+        let dir_mult = match zombie.direction {
+            ZombieDirection::Left => -1.0,
+            ZombieDirection::Right => 1.0,
+        };
+        physics.velocity_x = dir_mult * ZOMBIE_MAX_SPEED;
+        zombie.animation_progress += delta_time;
+
+        // Out of the left or right edge of the world -> turn around next tick.
+        if position.x() <= 0.0 && zombie.direction == ZombieDirection::Left {
+            to_flip.push((entity, ZombieDirection::Right));
+        } else if position.x() + ZOMBIE_WIDTH >= world_width && zombie.direction == ZombieDirection::Right {
+            to_flip.push((entity, ZombieDirection::Left));
+        }
+    }
+
+    for (entity, dir) in to_flip {
+        if let Ok(zombie) = entities.ecs.query_one_mut::<&mut ZombieComponent>(entity) {
+            zombie.set_direction(dir);
+        }
+    }
+}
+
