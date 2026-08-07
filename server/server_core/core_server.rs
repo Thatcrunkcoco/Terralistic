@@ -24,6 +24,7 @@ use super::gases::ServerGases;
 use super::mod_manager::ServerModManager;
 use super::networking::ServerNetworking;
 use super::walls::ServerWalls;
+ use super::zombies::ServerZombies;
 use super::world_generator::WorldGenerator;
 
 pub const SINGLEPLAYER_PORT: u16 = 49152;
@@ -41,6 +42,7 @@ pub struct Server {
     entities: ServerEntities,
     items: ServerItems,
     players: ServerPlayers,
+    zombies: ServerZombies,
     ui_event_receiver: Option<Receiver<UiMessageType>>,
     commands: CommandManager,
     world_seed: u64,
@@ -67,6 +69,7 @@ impl Server {
             entities: ServerEntities::new(),
             items: ServerItems::new(),
             players: ServerPlayers::new(),
+            zombies: ServerZombies::new(),
             ui_event_receiver,
             commands,
             world_seed: 423_657,
@@ -269,6 +272,14 @@ impl Server {
             tracing::debug!("gas: kept persisted gas layer from save (skip re-init/re-seed)");
         }
 
+        // Spawn the test zombies on the flat grass just right of the demo
+        // gas/liquid structures so they walk across the map. Gated to the
+        // reserved flat test world, matching the gas/liquid seeding.
+        if self.world_name == "test" && self.world_seed == 123 {
+            if let Err(e) = self.zombies.seed(&mut self.entities.get_entities(), &self.blocks.get_blocks(), &mut self.networking) {
+                print_to_console(&format!("failed to seed zombies: {e}"), 2);
+            }
+        }
         self.set_state(ServerState::Running);
 
         print_to_console(&format!("server started in {}ms", timer.elapsed().as_millis()), 0);
@@ -356,6 +367,8 @@ impl Server {
                 &mut self.networking,
             )?;
             self.entities.get_entities().update_entities_ms(&self.blocks.get_blocks(), &mut self.events)?;
+            // Advance zombie walk logic on the same 5ms sub-tick (0.005 s).
+            self.zombies.update(&mut self.entities.get_entities(), &self.blocks.get_blocks(), 0.005);
             unsafe {
                 MS_COUNTER += 5;
             }
@@ -445,6 +458,7 @@ impl Server {
             self.players
                 .on_event(&event, &mut self.entities.get_entities(), &self.blocks, &mut self.networking, &mut self.events, &self.items.get_items())?;
             ServerEntities::on_event(&event, &mut self.networking)?;
+            self.zombies.on_event(&event, &mut self.entities.get_entities(), &mut self.networking)?;
             self.networking.on_event(&event, &mut self.events)?;
             server_chat_on_event(&event, &mut self.networking)?;
         }

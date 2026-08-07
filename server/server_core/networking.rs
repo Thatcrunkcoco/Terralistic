@@ -34,6 +34,7 @@ impl PartialEq for Connection {
     }
 }
 
+#[derive(Clone)]
 pub enum SendTarget {
     All,
     Connection(Connection),
