@@ -1,7 +1,7 @@
 use crate::client::game::networking::ClientNetworking;
 use crate::client::game::players::ClientPlayers;
 use crate::libraries::events::{Event, EventManager};
-use crate::shared::entities::{Entities, EntityDespawnPacket, EntityPositionVelocityPacket, PhysicsComponent, PositionComponent};
+use crate::shared::entities::{Entities, EntityDespawnPacket, EntityPositionVelocityPacket, PhysicsComponent, PositionComponent, ZombieComponent};
 use crate::shared::packet::Packet;
 use crate::shared::players::PlayerPositionPacketToServer;
 use anyhow::Result;
@@ -43,9 +43,17 @@ impl ClientEntities {
 
                 {
                     let mut entities = self.get_entities();
-                    let position_component = entities.ecs.query_one_mut::<&mut PositionComponent>(entity)?;
-                    position_component.set_x(packet.x);
-                    position_component.set_y(packet.y);
+                    // Zombies interpolation: record the authoritative snapshot as
+                    // a target instead of hard-snapping position, so the local
+                    // physics integration (already running every subtick) keeps
+                    // their bodies gliding smoothly between the 1 Hz syncs.
+                    if let Ok(mut zombie) = entities.ecs.query_one_mut::<&mut ZombieComponent>(entity) {
+                        zombie.set_target(packet.x, packet.y);
+                    } else {
+                        let position_component = entities.ecs.query_one_mut::<&mut PositionComponent>(entity)?;
+                        position_component.set_x(packet.x);
+                        position_component.set_y(packet.y);
+                    }
                 }
 
                 {

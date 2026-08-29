@@ -378,6 +378,11 @@ pub struct ZombieComponent {
     /// Local frame counter used to advance the walk animation. Not networked;
     /// each side advances it consistently with wall-clock time via delta_time.
     pub animation_progress: f32,
+    /// Client-side interpolation target (server-authoritative snapshot). The
+    /// client lerps the rendered position toward this instead of hard-snapping,
+    /// so movement stays smooth between the (1 Hz) entity syncs.
+    target_x: f32,
+    target_y: f32,
 }
 
 impl ZombieComponent {
@@ -386,6 +391,8 @@ impl ZombieComponent {
         Self {
             direction: ZombieDirection::Right,
             animation_progress: 0.0,
+            target_x: 0.0,
+            target_y: 0.0,
         }
     }
 
@@ -397,15 +404,32 @@ impl ZombieComponent {
     pub fn set_direction(&mut self, direction: ZombieDirection) {
         self.direction = direction;
     }
+
+    #[must_use]
+    pub const fn target_x(&self) -> f32 {
+        self.target_x
+    }
+
+    #[must_use]
+    pub const fn target_y(&self) -> f32 {
+        self.target_y
+    }
+
+    pub fn set_target(&mut self, x: f32, y: f32) {
+        self.target_x = x;
+        self.target_y = y;
+    }
 }
 
 /// Spawns a zombie entity at the given world coords (in blocks) and assigns it a
 /// fresh id. Returns the spawned entity.
 pub fn spawn_zombie(entities: &mut Entities, x: f32, y: f32) -> Result<hecs::Entity> {
+    let mut zombie = ZombieComponent::new();
+    zombie.set_target(x, y);
     let entity = entities.ecs.spawn((
         PositionComponent::new(x, y),
         PhysicsComponent::new(ZOMBIE_WIDTH, ZOMBIE_HEIGHT),
-        ZombieComponent::new(),
+        zombie,
     ));
 
     let id = entities.new_id();

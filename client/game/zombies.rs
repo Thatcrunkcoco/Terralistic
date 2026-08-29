@@ -9,10 +9,20 @@ use crate::shared::mod_manager::ModManager;
 use crate::shared::packet::Packet;
 
 /// Number of procedural walk frames baked into the zombie sprite sheet.
-pub const ZOMBIE_WALK_FRAMES: usize = 4;
+pub const ZOMBIE_WALK_FRAMES: usize = 16;
+
+/// Seconds per full walk cycle (16 frames). Drives both the frame pacing and
+/// the body bob so limbs and bounce stay in lockstep.
+const WALK_CYCLE_SECONDS: f32 = 1.0;
 /// Pixel size of a single walk frame (matches the player's 2x3 block body).
 const FRAME_PX_W: u32 = 16;
 const FRAME_PX_H: u32 = 24;
+
+/// Sub-pixel subdivision per axis used by [`fill`]: each pixel is sampled at
+/// `SUBPIXELS` x `SUBPIXELS` points, so fractional rect coordinates keep their
+/// coverage instead of snapping to whole pixels. Higher = smoother limb motion
+/// in the baked sprite at slightly higher bake cost (bake runs once at load).
+const SUBPIXELS: usize = 4;
 
 /// Palette used by the procedural zombie.
 const SKIN: gfx::Color = gfx::Color::new(94, 158, 70, 255); // sickly green
@@ -61,16 +71,35 @@ impl ClientZombies {
 
     /// Advances zombie animation timers using the same fixed timestep cadence
     /// the server uses (called on the 5ms sub-tick), so the client-side walk
-    /// cycle stays roughly in sync with the server's movement.
+    /// cycle stays roughly in sync with the server's movement. Also lerps each
+    /// zombie's position toward the server snapshot target so their bodies
+    /// glide between the (1 Hz) authoritative syncs instead of snapping.
     pub fn update(&self, entities: &mut Entities) -> Result<()> {
-        for (_, zombie) in entities.ecs.query_mut::<&mut ZombieComponent>() {
+        for (_, (position, zombie)) in entities.ecs.query_mut::<(&mut PositionComponent, &mut ZombieComponent)>() {
             zombie.animation_progress += 0.005;
             // Keep it bounded so the animation stays continuous.
             if zombie.animation_progress > 10_000.0 {
                 zombie.animation_progress = 0.0;
             }
+
+            // Smooth the authoritative position correction: move a fraction of
+            // the way to the target each subtick. This absorbs the 1 Hz sync
+            // step while eventually converging to the server's position.
+            const LERP: f32 = 0.15;
+            position.set_x(position.x() + (zombie.target_x() - position.x()) * LERP);
+            position.set_y(position.y() + (zombie.target_y() - position.y()) * LERP);
         }
         Ok(())
+    }
+
+    /// Converts wall-clock animation time into the baked-sheet frame index,
+    /// paced by [`WALK_CYCLE_SECONDS`]. Splits the cycle into frame-sized
+    /// phases and picks the frame whose phase window contains the current
+    /// time, cycling cleanly across the frames.
+    fn frame_index(animation_progress: f32) -> usize {
+        let cycle_len = WALK_CYCLE_SECONDS / ZOMBIE_WALK_FRAMES as f32;
+        let raw = animation_progress / cycle_len;
+        raw.floor() as usize % ZOMBIE_WALK_FRAMES
     }
 
     /// Draws every zombie. Facing is derived from the synced horizontal velocity;
@@ -81,10 +110,9 @@ impl ClientZombies {
             // Derive facing from velocity so direction stays server-authoritative.
             let flipped = physics.velocity_x < -0.01;
 
-            // Keep the frame within [0, ZOMBIE_WALK_FRAMES).
-            let cycle = ZOMBIE_WALK_FRAMES as f32;
-            let raw = zombie.animation_progress % cycle;
-            let frame = raw.floor() as usize % ZOMBIE_WALK_FRAMES;
+            // Keep the frame within [0, ZOMBIE_WALK_FRAMES), paced by the walk
+            // cycle so the full set of frames plays once per WALK_CYCLE_SECONDS.
+            let frame = Self::frame_index(zombie.animation_progress);
 
             // Choose the src rect for this frame in the horizontal strip.
             let src_rect = gfx::Rect::new(
@@ -94,8 +122,8 @@ impl ClientZombies {
 
             // Center the sprite on its collision box. The sprite fills the box
             // exactly (frame is 2x3 blocks at RENDER_SCALE), so no extra offset.
-            let screen_x = (position.x() * RENDER_BLOCK_WIDTH - top_left.0 * RENDER_BLOCK_WIDTH).round();
-            let screen_y = (position.y() * RENDER_BLOCK_WIDTH - top_left.1 * RENDER_BLOCK_WIDTH).round();
+            let screen_x = position.x() * RENDER_BLOCK_WIDTH - top_left.0 * RENDER_BLOCK_WIDTH;
+            let screen_y = position.y() * RENDER_BLOCK_WIDTH - top_left.1 * RENDER_BLOCK_WIDTH;
 
             self.sprite_sheet.render(graphics, RENDER_SCALE, gfx::FloatPos(screen_x, screen_y), Some(src_rect), flipped, None);
         }
@@ -114,55 +142,113 @@ pub fn build_zombie_sheet(frame_count: usize) -> Result<gfx::Surface> {
     let mut sheet = gfx::Surface::new(size);
     for frame in 0..frame_count {
         let origin = gfx::IntPos(frame as i32 * FRAME_PX_W as i32, 0);
-        draw_zombie_frame(&mut sheet, origin, frame, frame_count);
+        draw_zombie_frame(&mut sheet, origin, frame);
     }
     Ok(sheet)
 }
 
 /// Draws a single zombie body into `sheet` at pixel `origin` for the given
 /// walk-frame index. Body segments are placed via helper `limb`.
-fn draw_zombie_frame(sheet: &mut gfx::Surface, origin: gfx::IntPos, frame: usize, frame_count: usize) {
+fn draw_zombie_frame(sheet: &mut gfx::Surface, origin: gfx::IntPos, frame: usize) {
+    let of = gfx::FloatPos(origin.0 as f32, origin.1 as f32);
+    let sway = arc_sway(frame);
+
+    // Body bob: the torso/head rise and fall once per step (twice per cycle)
+    // so the walk reads as a bounce, not a rigid slide. Feet stay planted.
+    let bob = arc_sway(frame);
+    let bob_offset = -bob.abs() * 1.0;
+
     // Head: a 6x6 green block at the top center.
-    fill(sheet, origin + gfx::IntPos(5, 1), 6, 7, SKIN);
+    fill(sheet, of + gfx::FloatPos(5.0, 1.0 + bob_offset), 6, 7, SKIN);
     // Eyes/gape: two dark pits.
-    fill(sheet, origin + gfx::IntPos(6, 3), 1, 1, OUTLINE);
-    fill(sheet, origin + gfx::IntPos(9, 3), 1, 1, OUTLINE);
+    fill(sheet, of + gfx::FloatPos(6.0, 3.0 + bob_offset), 1, 1, OUTLINE);
+    fill(sheet, of + gfx::FloatPos(9.0, 3.0 + bob_offset), 1, 1, OUTLINE);
 
     // Torso under head.
-    fill(sheet, origin + gfx::IntPos(6, 8), 4, 5, SHIRT);
+    fill(sheet, of + gfx::FloatPos(6.0, 8.0 + bob_offset), 4, 5, SHIRT);
 
-    // Arms hang at the sides; they sway with the walk cycle.
-    let sway = arc_sway(frame, frame_count); // in [-1, 1]
-    let arm_lift = (sway * 2.0).round() as i32;
-    fill(sheet, origin + gfx::IntPos(3 + arm_lift, 9), 2, 5, SHIRT);
-    fill(sheet, origin + gfx::IntPos(11 - arm_lift, 9), 2, 5, SHIRT);
+    // Arms hang at the sides; they sway with the walk cycle. The sway is a
+    // smooth sine in [-1, 1] and we keep it fractional (no rounding) so the
+    // limbs glide continuously through the cycle in the baked sprite.
+    let arm_lift = sway * 2.0;
+    fill(sheet, of + gfx::FloatPos(3.0 + arm_lift, 9.0 + bob_offset), 2, 5, SHIRT);
+    fill(sheet, of + gfx::FloatPos(11.0 - arm_lift, 9.0 + bob_offset), 2, 5, SHIRT);
 
     // Legs: front/back alternate with the frame to read as walking.
-    let leg_swing = (sway * 3.0).round() as i32;
+    let leg_swing = sway * 3.0;
     // Left leg (behind).
-    fill(sheet, origin + gfx::IntPos(5 + leg_swing / 2, 13), 2, 8, PANT);
+    fill(sheet, of + gfx::FloatPos(5.0 + leg_swing / 2.0, 13.0), 2, 8, PANT);
     // Right leg (in front).
-    fill(sheet, origin + gfx::IntPos(9 - leg_swing / 2, 13), 2, 8, PANT);
+    fill(sheet, of + gfx::FloatPos(9.0 - leg_swing / 2.0, 13.0), 2, 8, PANT);
 
     // Feet: small dark blocks at the bottom.
-    fill(sheet, origin + gfx::IntPos(4 + leg_swing, 21), 3, 2, OUTLINE);
-    fill(sheet, origin + gfx::IntPos(9 - leg_swing, 21), 3, 2, OUTLINE);
+    fill(sheet, of + gfx::FloatPos(4.0 + leg_swing, 21.0), 3, 2, OUTLINE);
+    fill(sheet, of + gfx::FloatPos(9.0 - leg_swing, 21.0), 3, 2, OUTLINE);
 }
 
 /// Maps a frame index to a smooth swing value in [-1, 1] over the walk cycle.
-fn arc_sway(frame: usize, frame_count: usize) -> f32 {
+fn arc_sway(frame: usize) -> f32 {
     // Even frames push one way, odd frames the other, with a sine-like edge so
-    // the limbs don't snap. Deterministic for a given (frame, frame_count).
-    let t = (frame as f32 / frame_count.max(1) as f32) * std::f32::consts::TAU;
+    // the limbs don't snap. Deterministic for a given frame.
+    let t = (frame as f32 / ZOMBIE_WALK_FRAMES as f32) * std::f32::consts::TAU;
     t.sin()
 }
 
-/// Fills a solid rectangle of `color` into `sheet` starting at `top_left`.
-fn fill(sheet: &mut gfx::Surface, top_left: gfx::IntPos, w: i32, h: i32, color: gfx::Color) {
-    for dy in 0..h {
-        for dx in 0..w {
-            if let Ok(px) = sheet.get_pixel_mut(top_left + gfx::IntPos(dx, dy)) {
-                *px = color;
+/// Fills a solid rectangle of `color` into `sheet` starting at `top_left`,
+/// with fractional (sub-pixel) coordinates and dimensions. Each pixel's
+/// coverage is estimated by sampling `SUBPIXELS` x `SUBPIXELS` points so a
+/// rect offset by a fraction of a pixel renders its true coverage instead of
+/// snapping to whole pixels.
+fn fill(sheet: &mut gfx::Surface, top_left: gfx::FloatPos, w: i32, h: i32, color: gfx::Color) {
+    let min_x = top_left.0;
+    let min_y = top_left.1;
+    let max_x = min_x + w as f32;
+    let max_y = min_y + h as f32;
+
+    // Pixel index range touched by this rect (clamped into bounds below).
+    let px0 = min_x.floor() as i32;
+    let py0 = min_y.floor() as i32;
+    let px1 = max_x.ceil() as i32;
+    let py1 = max_y.ceil() as i32;
+
+    let samples = SUBPIXELS as f32;
+    let step = 1.0 / samples;
+
+    for py in py0..py1 {
+        for px in px0..px1 {
+            // get_pixel_mut below bounds-checks writes; out-of-range pixels are
+            // silently skipped, so fractional rects clipped by the frame edge
+            // still bake correctly.
+            let mut covered = 0;
+            for sy in 0..SUBPIXELS {
+                for sx in 0..SUBPIXELS {
+                    let sample_x = px as f32 + (sx as f32 + 0.5) * step;
+                    let sample_y = py as f32 + (sy as f32 + 0.5) * step;
+                    if sample_x >= min_x && sample_x < max_x && sample_y >= min_y && sample_y < max_y {
+                        covered += 1;
+                    }
+                }
+            }
+
+            if covered == 0 {
+                continue;
+            }
+
+            if let Ok(px_ref) = sheet.get_pixel_mut(gfx::IntPos(px, py)) {
+                if covered == SUBPIXELS * SUBPIXELS {
+                    *px_ref = color;
+                } else {
+                    // Alpha-blend partial coverage into whatever is already there.
+                    let coverage = covered as f32 / (SUBPIXELS * SUBPIXELS) as f32;
+                    let dst = *px_ref;
+                    let blended = gfx::Color::new(
+                        (dst.r as f32 * (1.0 - coverage) + color.r as f32 * coverage) as u8,
+                        (dst.g as f32 * (1.0 - coverage) + color.g as f32 * coverage) as u8,
+                        (dst.b as f32 * (1.0 - coverage) + color.b as f32 * coverage) as u8,
+                        (dst.a as f32 * (1.0 - coverage) + color.a as f32 * coverage) as u8,
+                    );
+                    *px_ref = blended;
+                }
             }
         }
     }
@@ -174,13 +260,13 @@ mod tests {
 
     #[test]
     fn sheet_sizes_match_frame_count() {
-        let sheet = build_zombie_sheet(4).unwrap();
-        assert_eq!(sheet.get_size(), gfx::IntSize(64, 24));
+        let sheet = build_zombie_sheet(16).unwrap();
+        assert_eq!(sheet.get_size(), gfx::IntSize(256, 24));
     }
 
     #[test]
     fn anchoring_corners_are_transparent() {
-        let sheet = build_zombie_sheet(4).unwrap();
+        let sheet = build_zombie_sheet(16).unwrap();
         // Top-left and top-right of the first frame should be clear background.
         assert_eq!(*sheet.get_pixel(gfx::IntPos(0, 0)).unwrap(), gfx::Color::new(0, 0, 0, 0));
         assert_eq!(*sheet.get_pixel(gfx::IntPos(15, 0)).unwrap(), gfx::Color::new(0, 0, 0, 0));
@@ -188,7 +274,7 @@ mod tests {
 
     #[test]
     fn head_is_present_in_frame_zero() {
-        let sheet = build_zombie_sheet(4).unwrap();
+        let sheet = build_zombie_sheet(16).unwrap();
         assert_eq!(*sheet.get_pixel(gfx::IntPos(5, 1)).unwrap(), SKIN);
     }
 }
