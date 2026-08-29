@@ -6,13 +6,29 @@
 > source. Git is the source of truth for code; this file is the source of truth
 > for *what the human wants next*. Keep it lean — it's a handoff, not a changelog.
 
-_Last updated: 2026-08-04 (cartoon substance renderer + perf + wall containment session)_
+_Last updated: 2026-08-28 (zombie entity basics + smooth walk animation/motion)_
 
 ---
 
 ## Next Up
 
-- **Substance rendering — the previously-deferred ONI-grade cartoon renderer is DONE.**
+- **Entities — zombies.** First non-player entity is in: a procedural, code-drawn
+  zombie that walks back and forth across the flat test world (name `"test"`, seed `123`),
+  seeded just right of the demo gas/liquid structures. Rendering is generated in code
+  (no PNGs): a 16-frame baked walk strip with sub-pixel limb sway + body bob; motion is
+  smoothed three ways — no `.round()` in the draw position, 16-frame walk cycle paced at
+  1s/cycle, and **client-side position interpolation** (the server syncs at 1 Hz, so the
+  client lerps toward the authoritative snapshot instead of hard-snapping, which was the
+  "pops block by block" root cause). Full detail:
+  `session_summaries/2026-08-28-entity-zombie-smooth-walk.md`.
+  - **Awaiting final user approval** — bodies now glide/pacing is smooth; next open ends
+    below.
+- **Remaining (not yet scoped):**
+  - **Zombie follow-ons:** AI (chase the player), collision with/around blocks while
+    walking, facing derivation is server-side velocity only (fine), and reconciling the
+    animation cadence (`WALK_CYCLE_SECONDS`) with actual walk speed so steps visually
+    cover the right ground distance per cycle.
+  - **Substance rendering — the previously-deferred ONI-grade cartoon renderer is DONE.**
   Gases and liquids now render as smooth, gooey, cartoon fluids via a **field-texture**
   approach (bake the visible region into an RGBA GPU texture at 1 texel/tile, draw ONE
   region quad, let the GPU bilinear + a 3×3 in-shader gaussian melt tile steps into a
