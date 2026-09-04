@@ -221,6 +221,13 @@ impl EntityId {
     const fn new(id: u32) -> Self {
         Self { id }
     }
+
+    /// The raw underlying numeric id. Needed by diagnostic tooling (trace /
+    /// dump harness) to key entity rows; never used for game logic.
+    #[must_use]
+    pub const fn raw(self) -> u32 {
+        self.id
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

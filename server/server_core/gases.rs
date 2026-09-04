@@ -66,6 +66,28 @@ impl ServerGases {
         self.layer.serialize()
     }
 
+    /// Read-only access to the per-tile gas layer for diagnostic tooling
+    /// (the sim trace / dump harness).
+    #[must_use]
+    pub fn get_layer(&self) -> &GasLayer {
+        &self.layer
+    }
+
+    /// (id, name) pairs for every registered gas type, in id order. Used by
+    /// diagnostic tooling to label per-type gas totals.
+    #[must_use]
+    pub fn get_registered_gases(&self) -> Vec<(GasId, String)> {
+        let gases = self.gases.lock().unwrap_or_else(PoisonError::into_inner);
+        gases
+            .get_all_gas_type_ids()
+            .into_iter()
+            .map(|id| {
+                let name = gases.get_gas_name(id).unwrap_or("?").to_owned();
+                (id, name)
+            })
+            .collect()
+    }
+
     /// Restores the gas layer from a previously-saved world file. Returns `Ok`
     /// if the blob was a valid gas layer, `Err` if it was missing/corrupt (the
     /// caller then falls back to a fresh air layer).
@@ -85,8 +107,7 @@ impl ServerGases {
 
     /// Rebuilds the gas layer to match the world and fills it with the default
     /// "air" gas. Call after world generation/load, when gas types are registered.
-    pub fn initialize_world(&mut self, blocks: &Blocks) {
-        let size = blocks.get_size();
+    pub fn initialize_world(&mut self, blocks: &Blocks) {        let size = blocks.get_size();
         if size.0 == 0 || size.1 == 0 {
             return;
         }

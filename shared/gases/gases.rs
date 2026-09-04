@@ -73,4 +73,15 @@ impl Gases {
     pub fn get_all_gas_type_ids(&self) -> Vec<GasId> {
         (0..self.gas_types.len() as i32).map(GasId::from_raw).collect()
     }
+
+    /// Returns the name of the gas type with the given id, if it is a
+    /// registered (non-negative) id. Used by diagnostic tooling to label
+    /// per-type gas totals.
+    #[must_use]
+    pub fn get_gas_name(&self, id: GasId) -> Option<&str> {
+        if id.raw() < 0 {
+            return None;
+        }
+        self.gas_types.get(id.raw() as usize).map(|gas_type| gas_type.name.as_str())
+    }
 }

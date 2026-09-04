@@ -165,6 +165,7 @@ use crate::client::global_settings::GlobalSettings;
 use crate::client::menus::{run_title_screen, MenuBack};
 use crate::client::settings::Settings;
 use crate::libraries::graphics as gfx;
+use crate::server::server_core::trace::SimTraceConfig;
 use crate::server::server_core::{Server, MULTIPLAYER_PORT};
 use crate::server::server_ui::UiManager;
 
@@ -207,6 +208,10 @@ fn main() {
         Some("version") => println!("{}", shared::versions::VERSION),
         Some(other) => println!("Invalid argument: {other}"),
     }
+}
+
+fn parse_flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|argument| argument == flag).and_then(|position| args.get(position + 1)).cloned()
 }
 
 fn server_main(args: &[String]) {
@@ -270,6 +275,25 @@ fn server_main(args: &[String]) {
         server.set_world_params(123, "test");
     }
 
+    // Diagnostic harness flags (server/server_core/trace.rs). When any sim
+    // flag is present, the world is deliberately redirected to its own save
+    // file so trace/dump runs never mutate the normal multiplayer world.
+    let trace = parse_flag_value(args, "--trace");
+    let trace_ms = parse_flag_value(args, "--trace-ms").and_then(|value| value.parse::<i32>().ok());
+    let dump = parse_flag_value(args, "--dump");
+    let duration = parse_flag_value(args, "--duration").and_then(|value| value.parse::<i32>().ok());
+    let sim_flags_present = trace.is_some() || dump.is_some() || duration.is_some();
+    if sim_flags_present {
+        server.set_trace_config(SimTraceConfig {
+            trace_path: trace,
+            trace_ms: trace_ms.unwrap_or(250),
+            dump_path: dump,
+            duration_ms: duration,
+        });
+    }
+
+    let world_path = if sim_flags_present { path_clone.join("trace.world") } else { path.join("server.world") };
+
     if let Some(graphics) = server_graphics_context {
         let mut manager = UiManager::new(server, graphics, srv_to_ui_event_receiver, ui_to_srv_event_sender, path_clone);
         let res = manager.run(&server_running, &loading_text, vec![include_bytes!("base_game/base_game.mod").to_vec()], &path.join("server.world"));
@@ -277,7 +301,7 @@ fn server_main(args: &[String]) {
             println!("Server stopped with an error: {e}");
         }
     } else {
-        let res = server.run(&server_running, &loading_text, vec![include_bytes!("base_game/base_game.mod").to_vec()], &path.join("server.world"));
+        let res = server.run(&server_running, &loading_text, vec![include_bytes!("base_game/base_game.mod").to_vec()], &world_path);
         if let Err(e) = res {
             println!("Server stopped with an error: {e}");
         }

@@ -24,7 +24,8 @@ use super::gases::ServerGases;
 use super::mod_manager::ServerModManager;
 use super::networking::ServerNetworking;
 use super::walls::ServerWalls;
- use super::zombies::ServerZombies;
+use super::zombies::ServerZombies;
+use super::trace::{SimStateView, SimTrace, SimTraceConfig};
 use super::world_generator::WorldGenerator;
 
 pub const SINGLEPLAYER_PORT: u16 = 49152;
@@ -48,6 +49,7 @@ pub struct Server {
     world_seed: u64,
     world_name: String,
     player_event_receiver: Option<Receiver<Event>>,
+    trace: SimTrace,
 }
 
 impl Server {
@@ -75,6 +77,7 @@ impl Server {
             world_seed: 423_657,
             world_name: "server".to_owned(),
             player_event_receiver: None,
+            trace: SimTrace::new(),
         }
     }
 
@@ -83,6 +86,12 @@ impl Server {
     pub fn set_world_params(&mut self, seed: u64, name: &str) {
         self.world_seed = seed;
         self.world_name = name.to_owned();
+    }
+
+    /// Configures the sim trace / dump harness before the server starts.
+    /// See `server/server_core/trace.rs`.
+    pub fn set_trace_config(&mut self, config: SimTraceConfig) {
+        self.trace.set_config(config);
     }
 
     pub fn set_state(&self, server_state: ServerState) {
@@ -381,7 +390,58 @@ impl Server {
             }
         }
 
+        // Diagnostic harness (server/server_core/trace.rs): emit trace rows on
+        // the configured interval and auto-stop once `--duration` expired. Both
+        // run on simulated (5ms sub-tick) time, not wall clock, so dumps are
+        // tick-exact regardless of machine speed.
+        let sim_ms: i32 = unsafe { MS_COUNTER };
+        self.trace.note_sim_ms(sim_ms);
+        if let Err(e) = self.update_sim_trace(sim_ms) {
+            print_to_console(&format!("sim trace error: {e:?}"), 2);
+        }
+        if let Some(duration) = self.trace.duration_ms() {
+            if sim_ms >= duration {
+                let _ = self.write_sim_dump(sim_ms);
+                self.set_state(ServerState::Stopping);
+            }
+        }
+
         Ok(())
+    }
+
+    /// Builds the read-only state slice diagnostic tooling consumes and steps
+    /// the trace harness (row emission at the configured interval).
+    pub fn update_sim_trace(&mut self, sim_ms: i32) -> Result<()> {
+        let mut entities = self.entities.get_entities();
+        let blocks = self.blocks.get_blocks();
+        let (width, height) = blocks.get_size();
+        let gas_names = self.gases.get_registered_gases();
+        let mut sim = SimStateView {
+            entities: &mut entities,
+            gas_layer: self.gases.get_layer(),
+            gas_names,
+            sim_ms,
+            world_seed: self.world_seed,
+            world_size: (width, height),
+        };
+        self.trace.maybe_trace(sim_ms, &mut sim)
+    }
+
+    /// Writes the end-state dump; called from `stop`. Idempotent.
+    pub fn write_sim_dump(&mut self, sim_ms: i32) -> Result<()> {
+        let mut entities = self.entities.get_entities();
+        let blocks = self.blocks.get_blocks();
+        let (width, height) = blocks.get_size();
+        let gas_names = self.gases.get_registered_gases();
+        let mut sim = SimStateView {
+            entities: &mut entities,
+            gas_layer: self.gases.get_layer(),
+            gas_names,
+            sim_ms,
+            world_seed: self.world_seed,
+            world_size: (width, height),
+        };
+        self.trace.write_dump(&mut sim)
     }
 
     /// Stops the server - manual way. It stops the server and returns
@@ -390,6 +450,14 @@ impl Server {
             //so we don't stop it twice
             return Ok(());
         }
+
+        // Diagnostic harness: emit the end-state dump before teardown (no-op
+        // unless `--dump` was configured). Uses the last simulated time seen
+        // by the update loop.
+        if let Err(e) = self.write_sim_dump(self.trace.last_sim_ms()) {
+            print_to_console(&format!("sim dump error: {e:?}"), 2);
+        }
+
         // stop modules
         self.networking.stop(&mut self.events)?;
         self.mods.stop()?;

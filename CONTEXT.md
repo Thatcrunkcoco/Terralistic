@@ -6,7 +6,7 @@
 > source. Git is the source of truth for code; this file is the source of truth
 > for *what the human wants next*. Keep it lean — it's a handoff, not a changelog.
 
-_Last updated: 2026-08-28 (zombie entity basics + smooth walk animation/motion)_
+_Last updated: 2026-09-04 (Tier 1 numeric test harness: sim trace + dump)_
 
 ---
 
@@ -50,7 +50,26 @@ _Last updated: 2026-08-28 (zombie entity basics + smooth walk animation/motion)_
     gases (clean generic mechanism).
   - **New overlays** (plumbing, electrical, item transport) as additional
     `OverlayProvider`s.
-  - Clean up legacy "pressure" wording in a few test function names/comments (cosmetic).
+  - **Tier 1 numeric test harness — DONE.** `server` CLI grew diagnostic flags:
+  `--trace <csv> --trace-ms N` (entity trajectory rows + gas fnv-checksum/per-type-total
+  rows, schema `#trace v1`), `--dump <json>` (deterministic end-state snapshot incl.
+  `payload_fnv64` golden value), `--duration <virtual_ms>` (auto-stop on simulated time,
+  tick-exact). Sim-flag runs use their own world save (`server_data/trace.world`) so they
+  never mutate the real multiplayer world. Validated live: zombie x advances exactly at
+  1.5 blocks/s across rows; gas totals/fnv constant in the sealed test rooms across the
+  whole run.
+  - **Bit-exact golden-state tests** need a deterministic stepping loop (today sub-ticks
+    fill from wall clock, so cross-run/cross-machine dumps differ slightly near the stop
+    edge). In-process nogui `Server` golden tests are the stretch goal.
+- **Zombie bake fixes (visual round):** exposed via a new agent sheet-inspection
+  hook —`CAPTURE_SHEET=<dir> cargo test dump_zombie_sheet` writes the full 16-frame
+  walk strip as PPM at 8x zoom, which the agent reads/converts to PNG and reviews. Fixed:
+  straight-alpha partial-coverage compositing (no more gray ghosting), feet anchored to
+  their legs (was sliding out from under), leg swing 3→2 (stays under torso), arms now
+  pump vertically at fixed x in opposite phase (horizontal slide detached them).
+- **Capture harness (next milestone):** frame-capture mode (hidden window,
+  png crate, CLI camera) → scripted keyboard play → mouse actions later. Screenshots /
+  your video drops also feed my multimodal analysis in-session.
 
 ## Decisions
 

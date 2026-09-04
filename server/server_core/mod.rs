@@ -13,3 +13,4 @@ mod players;
 mod walls;
 mod zombies;
 mod world_generator;
+pub mod trace;

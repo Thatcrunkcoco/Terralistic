@@ -167,23 +167,30 @@ fn draw_zombie_frame(sheet: &mut gfx::Surface, origin: gfx::IntPos, frame: usize
     // Torso under head.
     fill(sheet, of + gfx::FloatPos(6.0, 8.0 + bob_offset), 4, 5, SHIRT);
 
-    // Arms hang at the sides; they sway with the walk cycle. The sway is a
-    // smooth sine in [-1, 1] and we keep it fractional (no rounding) so the
-    // limbs glide continuously through the cycle in the baked sprite.
-    let arm_lift = sway * 2.0;
-    fill(sheet, of + gfx::FloatPos(3.0 + arm_lift, 9.0 + bob_offset), 2, 5, SHIRT);
-    fill(sheet, of + gfx::FloatPos(11.0 - arm_lift, 9.0 + bob_offset), 2, 5, SHIRT);
+    // Arms hang at the sides at FIXED x and pump vertically, in opposite
+    // phases (left leg forward => right arm forward and vice versa), so they
+    // read as stride motion while staying attached to the torso. Fractional
+    // offsets keep the motion continuous across the 16-frame cycle.
+    let arm_pump = sway * 1.5;
+    fill(sheet, of + gfx::FloatPos(3.0, 9.0 + bob_offset - arm_pump), 2, 5, SHIRT);
+    fill(sheet, of + gfx::FloatPos(11.0, 9.0 + bob_offset + arm_pump), 2, 5, SHIRT);
 
-    // Legs: front/back alternate with the frame to read as walking.
-    let leg_swing = sway * 3.0;
+    // Legs: front/back alternate with the frame to read as walking. The
+    // amplitude is kept at 2px so the leg tops stay anchored under the torso
+    // (spans x 6..10) instead of splaying out of the body silhouette.
+    let leg_swing = sway * 2.0;
     // Left leg (behind).
-    fill(sheet, of + gfx::FloatPos(5.0 + leg_swing / 2.0, 13.0), 2, 8, PANT);
+    let left_leg_x = 5.0 + leg_swing / 2.0;
     // Right leg (in front).
-    fill(sheet, of + gfx::FloatPos(9.0 - leg_swing / 2.0, 13.0), 2, 8, PANT);
+    let right_leg_x = 9.0 - leg_swing / 2.0;
+    fill(sheet, of + gfx::FloatPos(left_leg_x, 13.0), 2, 8, PANT);
+    fill(sheet, of + gfx::FloatPos(right_leg_x, 13.0), 2, 8, PANT);
 
-    // Feet: small dark blocks at the bottom.
-    fill(sheet, of + gfx::FloatPos(4.0 + leg_swing, 21.0), 3, 2, OUTLINE);
-    fill(sheet, of + gfx::FloatPos(9.0 - leg_swing, 21.0), 3, 2, OUTLINE);
+    // Feet: small dark blocks at the bottom, anchored to their leg so the
+    // foot never slides out from under the leg column (foot is 3px wide and
+    // centered on the leg's 2px column).
+    fill(sheet, of + gfx::FloatPos(left_leg_x - 0.5, 21.0), 3, 2, OUTLINE);
+    fill(sheet, of + gfx::FloatPos(right_leg_x - 0.5, 21.0), 3, 2, OUTLINE);
 }
 
 /// Maps a frame index to a smooth swing value in [-1, 1] over the walk cycle.
@@ -238,16 +245,30 @@ fn fill(sheet: &mut gfx::Surface, top_left: gfx::FloatPos, w: i32, h: i32, color
                 if covered == SUBPIXELS * SUBPIXELS {
                     *px_ref = color;
                 } else {
-                    // Alpha-blend partial coverage into whatever is already there.
+                    // Straight-alpha compositing: partial coverage keeps the
+                    // limb's own RGB (no darkening toward the underneath
+                    // pixel's channels) and scales only the alpha, so the
+                    // soft edge stays the limb color and composites cleanly
+                    // over any background at draw time.
                     let coverage = covered as f32 / (SUBPIXELS * SUBPIXELS) as f32;
+                    let src_a = f32::from(color.a) / 255.0 * coverage;
                     let dst = *px_ref;
-                    let blended = gfx::Color::new(
-                        (dst.r as f32 * (1.0 - coverage) + color.r as f32 * coverage) as u8,
-                        (dst.g as f32 * (1.0 - coverage) + color.g as f32 * coverage) as u8,
-                        (dst.b as f32 * (1.0 - coverage) + color.b as f32 * coverage) as u8,
-                        (dst.a as f32 * (1.0 - coverage) + color.a as f32 * coverage) as u8,
+                    let dst_a = f32::from(dst.a) / 255.0;
+                    // "over" operator: result = src over dst, un-premultiplied.
+                    let out_a = src_a + dst_a * (1.0 - src_a);
+                    let blend_channel = |src: u8, dst: u8| -> u8 {
+                        if out_a <= 0.0 {
+                            0
+                        } else {
+                            ((f32::from(src) / 255.0 * src_a + f32::from(dst) / 255.0 * dst_a * (1.0 - src_a)) / out_a * 255.0) as u8
+                        }
+                    };
+                    *px_ref = gfx::Color::new(
+                        blend_channel(color.r, dst.r),
+                        blend_channel(color.g, dst.g),
+                        blend_channel(color.b, dst.b),
+                        (out_a * 255.0) as u8,
                     );
-                    *px_ref = blended;
                 }
             }
         }
@@ -276,5 +297,39 @@ mod tests {
     fn head_is_present_in_frame_zero() {
         let sheet = build_zombie_sheet(16).unwrap();
         assert_eq!(*sheet.get_pixel(gfx::IntPos(5, 1)).unwrap(), SKIN);
+    }
+
+    /// Visual-inspection hook for the agent / devs: run with
+    /// `CAPTURE_SHEET=<dir> cargo test dump_zombie_sheet -- --nocapture` to
+    /// write the full baked walk sheet as a zero-dependency PPM (P6) image at
+    /// 8x nearest-neighbor zoom over a white background. The agent can then
+    /// read and review every frame directly.
+    #[test]
+    fn dump_zombie_sheet_when_requested() {
+        let Ok(dir) = std::env::var("CAPTURE_SHEET") else { return };
+        let sheet = build_zombie_sheet(ZOMBIE_WALK_FRAMES).unwrap();
+        let scale = 8u32;
+        let size = sheet.get_size();
+        let (out_w, out_h) = (size.0 * scale, size.1 * scale);
+        let mut png = vec![0u8; (out_w * out_h * 3) as usize];
+        for y in 0..out_h {
+            for x in 0..out_w {
+                let src = sheet.get_pixel(gfx::IntPos((x / scale) as i32, (y / scale) as i32)).unwrap();
+                // sin over the cycle is zero at both ends (frame 0 == frame N),
+                // so transparency should only exist at the strip ends.
+                let a = f32::from(src.a) / 255.0;
+                let blend = |channel: u8| (f32::from(channel) * a + 255.0 * (1.0 - a)) as u8;
+                let idx = ((y * out_w + x) * 3) as usize;
+                png[idx] = blend(src.r);
+                png[idx + 1] = blend(src.g);
+                png[idx + 2] = blend(src.b);
+            }
+        }
+        let header = format!("P6\n{out_w} {out_h}\n255\n");
+        let path = std::path::Path::new(&dir).join("zombie_sheet.ppm");
+        std::fs::write(path.clone(), header.as_bytes()).unwrap();
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        std::io::Write::write_all(&mut file, &png).unwrap();
+        println!("zombie sheet dumped to {}/zombie_sheet.ppm", dir);
     }
 }

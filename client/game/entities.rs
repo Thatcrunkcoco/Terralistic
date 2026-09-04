@@ -47,7 +47,7 @@ impl ClientEntities {
                     // a target instead of hard-snapping position, so the local
                     // physics integration (already running every subtick) keeps
                     // their bodies gliding smoothly between the 1 Hz syncs.
-                    if let Ok(mut zombie) = entities.ecs.query_one_mut::<&mut ZombieComponent>(entity) {
+                    if let Ok(zombie) = entities.ecs.query_one_mut::<&mut ZombieComponent>(entity) {
                         zombie.set_target(packet.x, packet.y);
                     } else {
                         let position_component = entities.ecs.query_one_mut::<&mut PositionComponent>(entity)?;
