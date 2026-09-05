@@ -42,6 +42,9 @@ tracing-appender = "0.2"
 backtrace = "0.3"
 ab_glyph = "0.2"
 
+# frame-capture harness (--capture on the client writes PNG screenshots)
+png = "0.17"
+
 # set custom dependency for windows
 [target.'cfg(windows)'.dependencies]
 sdl2 = { version = "=0.38.0", features = ["bundled", "static-link"] }

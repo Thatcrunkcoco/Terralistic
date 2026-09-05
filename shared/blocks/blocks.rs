@@ -29,7 +29,7 @@ pub(super) struct BlocksData {
     pub block_inventory_data: HashMap<usize, Vec<Option<ItemStack>>>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct BlockId {
     pub(super) id: i8,
 }
@@ -436,4 +436,69 @@ pub struct BlockChangePacket {
 pub struct BlockRightClickPacket {
     pub x: i32,
     pub y: i32,
+}
+
+// --- scratch: dump harness capture-world block ids (agent diagnostics) ---
+// Run with: CAPTURE_WORLD=<save path> cargo test dump_capture_world_blocks -- --nocapture
+#[test]
+fn dump_capture_world_blocks() {
+    let Ok(path) = std::env::var("CAPTURE_WORLD") else { println!("CAPTURE_WORLD not set; skipping"); return };
+    let world_file = std::fs::read(&path).unwrap();
+    let world: std::collections::HashMap<String, Vec<u8>> = bincode::deserialize(&world_file).unwrap();
+    let decoded = snap::raw::Decoder::new().decompress_vec(world.get("blocks").unwrap()).unwrap();
+    let data: BlocksData = bincode::deserialize(&decoded).unwrap();
+    println!("map size = {:?}", data.map.get_size());
+    println!("blocks len = {}", data.blocks.len());
+    let zeros = data.blocks.iter().filter(|b| b.id == 0).count();
+    println!("zero ids = {zeros}");
+    for (x, y) in [(16u32, 5u32), (17, 10), (16, 10), (16, 11), (1, 0), (0, 0)] {
+        let index = data.map.translate_coords(x as i32, y as i32).unwrap();
+        println!("block ({x},{y}) = id {}", data.blocks[index].id);
+    }
+    // vertical slice around x=16: which rows are non-air?
+    for y in 0..u32::min(24, data.map.get_size().1) {
+        let index = data.map.translate_coords(16, y as i32).unwrap();
+        println!("x=16 y={y} id={}", data.blocks[index].id);
+    }
+    // how many nonzero blocks around x in 0..30?
+    for x in 0u32..30 {
+        let mut counts = std::collections::HashMap::new();
+        for y in 0u32..data.map.get_size().1 {
+            let index = data.map.translate_coords(x as i32, y as i32).unwrap();
+            *counts.entry(data.blocks[index].id).or_insert(0) += 1;
+        }
+        println!("x={x} id counts: {:?}", counts);
+    }
+}
+
+// more scratch: row profile near spawn and around the demo box
+#[test]
+fn dump_capture_world_rows() {
+    let Ok(path) = std::env::var("CAPTURE_WORLD") else { return };
+    let world_file = std::fs::read(&path).unwrap();
+    let world: std::collections::HashMap<String, Vec<u8>> = bincode::deserialize(&world_file).unwrap();
+    let decoded = snap::raw::Decoder::new().decompress_vec(world.get("blocks").unwrap()).unwrap();
+    let data: BlocksData = bincode::deserialize(&decoded).unwrap();
+    // where do all non-air id 12 live?
+    let mut hits = 0;
+    for y in 0u32..data.map.get_size().1 {
+        for x in 0u32..data.map.get_size().0 {
+            let index = data.map.translate_coords(x as i32, y as i32).unwrap();
+            let id = data.blocks[index].id;
+            if id == 12 { hits += 1; println!("   id12 at ({x},{y})"); }
+        }
+    }
+    println!("id==12 count = {hits}");
+    for x in [0u32, 13, 16, 24, 32] {
+        for y in 150u32..256 {
+            let index = data.map.translate_coords(x as i32, y as i32).unwrap();
+            let id = data.blocks[index].id;
+            if id != 0 {
+                print!("{id}");
+            } else {
+                print!(".");
+            }
+        }
+        println!("  <- x={x}");
+    }
 }

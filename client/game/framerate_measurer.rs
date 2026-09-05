@@ -15,10 +15,18 @@ pub struct FramerateMeasurer {
     avg_frame_time_stat: f32,
 
     delta_time: f32,
+    /// Deterministic mode (capture/script harness): sub-tick stepping is
+    /// driven by frame count instead of wall clock, so captures advance the
+    /// game at a fixed pace independent of load or fps.
+    deterministic: bool,
+    steps_this_frame: i32,
 }
 
+/// In deterministic mode, exactly this many 5ms sub-ticks run per frame.
+const DETERMINISTIC_STEPS_PER_FRAME: i32 = 4;
+
 impl FramerateMeasurer {
-    pub fn new() -> Self {
+    pub fn new(deterministic: bool) -> Self {
         Self {
             ms_timer: Instant::now(),
             ms_counter: 0,
@@ -34,12 +42,15 @@ impl FramerateMeasurer {
             avg_frame_time_stat: 0.0,
 
             delta_time: 0.0,
+            deterministic,
+            steps_this_frame: 0,
         }
     }
 
     pub fn update(&mut self) {
         self.delta_time = self.prev_time.elapsed().as_secs_f32() * 1000.0;
         self.prev_time = Instant::now();
+        self.steps_this_frame = 0;
 
         if self.stat_update_timer.elapsed().as_secs() >= 1 {
             self.fps_stat = self.fps_counter;
@@ -60,10 +71,19 @@ impl FramerateMeasurer {
     }
 
     pub fn has_5ms_passed(&mut self) -> bool {
-        let result = self.ms_counter < self.ms_timer.elapsed().as_millis() as i32;
-        if result {
-            self.ms_counter += 5;
-        }
+        let result = if self.deterministic {
+            // advance a fixed number of sub-ticks per rendered frame
+            self.steps_this_frame < DETERMINISTIC_STEPS_PER_FRAME && {
+                self.steps_this_frame += 1;
+                true
+            }
+        } else {
+            let passed = self.ms_counter < self.ms_timer.elapsed().as_millis() as i32;
+            if passed {
+                self.ms_counter += 5;
+            }
+            passed
+        };
         result
     }
 

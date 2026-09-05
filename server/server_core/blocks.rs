@@ -290,7 +290,6 @@ pub fn init_blocks_mod_interface_server(blocks: &Arc<Mutex<Blocks>>, mods: &mut 
             .set_block(&mut events, x, y, block_id)
             .ok()
             .ok_or(rlua::Error::RuntimeError("coordinates out of bounds".to_owned()))?;
-
         while let Some(event) = events.pop_event() {
             sender_clone.send(event).ok().ok_or(rlua::Error::RuntimeError("could not send event".to_owned()))?;
         }

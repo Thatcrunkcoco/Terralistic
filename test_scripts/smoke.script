@@ -1,0 +1,16 @@
+# scripted-play smoke test: teleport, screenshot, walk, break a block
+wait 500
+chat /tp 300 120
+wait 600
+shot
+chat /pos
+wait 600
+press d 1500
+wait 700
+shot
+worldclick 316 130 left 2000
+wait 800
+shot
+press space 30
+wait 400
+exit

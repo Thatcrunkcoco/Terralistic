@@ -131,7 +131,7 @@ impl WorldCreationMenu {
         let name = self.world_name_input.get_text().clone();
         let seed = self.world_seed_input.get_text().parse::<u64>().unwrap_or(0);
 
-        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), seed, name, self.settings.clone(), self.global_settings.clone(), self.debug) {
+        if let Ok(menu) = PrivateWorld::new(&self.world_path.clone(), seed, name, self.settings.clone(), self.global_settings.clone(), self.debug, crate::client::game::core_client::RunGameExtras::default()) {
             self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
         }
 

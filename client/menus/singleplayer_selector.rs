@@ -331,7 +331,7 @@ impl SingleplayerSelector {
             menu_back.render_back(graphics);
             {
                 let world = self.world_list.worlds.get(world)?;
-                if let Ok(menu) = PrivateWorld::new(world.get_file_path(), 0, world.name.clone(), self.settings.clone(), self.global_settings.clone(), self.debug) {
+                if let Ok(menu) = PrivateWorld::new(world.get_file_path(), 0, world.name.clone(), self.settings.clone(), self.global_settings.clone(), self.debug, crate::client::game::core_client::RunGameExtras::default()) {
                     self.open_menu = Some((Box::new(menu), "f LoadingScreen".to_owned()));
                 }
             }

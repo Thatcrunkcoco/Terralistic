@@ -161,6 +161,8 @@ use std::sync::Mutex;
 
 use directories::BaseDirs;
 
+use crate::client::game::capture::run_capture_client;
+use crate::client::game::capture::CaptureFlags;
 use crate::client::global_settings::GlobalSettings;
 use crate::client::menus::{run_title_screen, MenuBack};
 use crate::client::settings::Settings;
@@ -187,7 +189,6 @@ pub mod client {
     pub mod menus;
     pub mod settings;
 }
-
 mod debug_log;
 
 fn main() {
@@ -202,9 +203,9 @@ fn main() {
     let mode = args.iter().skip(1).find(|a| a.as_str() != "debug" && a.as_str() != "--debug");
     let debug = debug_log::requested(&args);
     match mode.map(String::as_str) {
-        None => client_main(debug),
+        None => client_main(debug, args.as_slice()),
         Some("server") => server_main(args.as_slice()),
-        Some("client") => client_main(debug),
+        Some("client") => client_main(debug, args.as_slice()),
         Some("version") => println!("{}", shared::versions::VERSION),
         Some(other) => println!("Invalid argument: {other}"),
     }
@@ -308,14 +309,33 @@ fn server_main(args: &[String]) {
     }
 }
 
-fn client_main(debug: bool) {
-    let graphics_result = gfx::init(
+fn client_main(debug: bool, args: &[String]) {
+    // Harness flags (client-side capture/play diagnostics):
+    // `--test`          skip the title screen, spawn the in-process private
+    //                   server on the flat seed-123 test world and run straight
+    //                   into gameplay on its own capture world save
+    // `--capture <dir>` write rendered frames as `frame_NNNNN.png` + manifest
+    // `--capture-interval <N>`  capture every Nth rendered frame (default 1)
+    // `--capture-frames <N>`    stop after N captures
+    // `--capture-duration <ms>` hard timeout for the whole run
+    // `--script <file>` scripted play DSL (wait/press/chat/worldclick/shot/..)
+    // `--hidden`        create the window hidden (headless CI/agent runs)
+    let hidden = args.contains(&"--hidden".to_owned());
+    let capture_test = args.contains(&"--test".to_owned());
+    let capture_flag = parse_flag_value(args, "--capture");
+    let capture_frames = parse_flag_value(args, "--capture-frames").and_then(|value| value.parse::<u32>().ok());
+    let capture_interval = parse_flag_value(args, "--capture-interval").and_then(|value| value.parse::<u32>().ok()).unwrap_or(1);
+    let capture_duration = parse_flag_value(args, "--capture-duration").and_then(|value| value.parse::<u64>().ok());
+    let script_flag = parse_flag_value(args, "--script");
+
+    let graphics_result = gfx::init_with_options(
         1670,
         1050,
         "Terralistic",
         include_bytes!("Build/Resources/font.opa"),
         Some(include_bytes!("Build/Resources/font_mono.opa")),
         Some((include_bytes!("Build/Resources/terminal_font.ttf"), 32.0, 4.0)),
+        hidden,
     );
 
     let mut graphics;
@@ -344,6 +364,27 @@ fn client_main(debug: bool) {
     let global_settings = Rc::new(RefCell::new(GlobalSettings::new()));
     global_settings.borrow_mut().init(&settings);
     global_settings.borrow_mut().update(&mut graphics, &settings);
+
+    // Harness path: straight into the private test world (skips menus).
+    if capture_test || capture_flag.is_some() || script_flag.is_some() {
+        let capture_flags = CaptureFlags {
+            capture_dir: capture_flag,
+            interval: capture_interval,
+            max_frames: capture_frames,
+            timeout_ms: capture_duration,
+            script_path: script_flag,
+        };
+
+        let capture_world_path = base_dirs.data_dir().join("Terralistic").join("CaptureWorlds").join("capture.world");
+
+        if let Err(e) = run_capture_client(&mut graphics, capture_flags, settings.clone(), global_settings.clone(), &capture_world_path, debug) {
+            println!("Capture run stopped with an error: {e}");
+        }
+
+        global_settings.borrow_mut().stop(&settings);
+        return;
+    }
+
     run_title_screen(&mut graphics, &settings, &global_settings, debug);
 
     global_settings.borrow_mut().stop(&settings);

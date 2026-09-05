@@ -37,6 +37,11 @@ pub struct GraphicsContext {
     // Keep track of all Key states as a hashmap
     key_states: HashMap<gfx::Key, bool>,
     events: Vec<gfx::Event>,
+    // Scripted-input override: when set, get_mouse_pos() returns this value
+    // instead of the real (hardware) mouse position. Sized in scaled UI units
+    // exactly like the real accessor, so both world and menu code behave as if
+    // the pointer really is where the script put it.
+    scripted_mouse_pos: Option<gfx::FloatPos>,
     pub(super) shadow_context: ShadowContext,
     pub clipboard_context: Clipboard,
     pub block_key_states: bool,
@@ -62,6 +67,7 @@ impl GraphicsContext {
         font: &[u8],
         font_mono: Option<&[u8]>,
         terminal_font_data: Option<(&'static [u8], f32, f32)>,
+        hidden_window: bool,
     ) -> Result<Self> {
         let sdl = sdl2::init();
         let sdl = sdl.map_err(|e| anyhow!(e))?;
@@ -73,7 +79,14 @@ impl GraphicsContext {
         gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
         gl_attr.set_context_version(3, 3);
 
-        let sdl_window = video_subsystem.window(window_title, window_width, window_height).position_centered().opengl().resizable().build()?;
+        let mut sdl_window = video_subsystem.window(window_title, window_width, window_height);
+        sdl_window.position_centered();
+        sdl_window.opengl();
+        sdl_window.resizable();
+        if hidden_window {
+            sdl_window.hidden();
+        }
+        let sdl_window = sdl_window.build()?;
 
         let gl_context = sdl_window.gl_create_context().map_err(|e| anyhow!(e))?;
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s).cast::<std::ffi::c_void>());
@@ -114,6 +127,7 @@ impl GraphicsContext {
             window_framebuffer,
             key_states: HashMap::new(),
             events: Vec::new(),
+            scripted_mouse_pos: None,
             blur_context: BlurContext::new()?,
             passthrough_shader,
             substance_shader,
@@ -347,10 +361,35 @@ impl GraphicsContext {
     /// Gets mouse position
     #[must_use]
     pub fn get_mouse_pos(&self) -> gfx::FloatPos {
+        if let Some(pos) = self.scripted_mouse_pos {
+            return pos;
+        }
         gfx::FloatPos(
             self.sdl_event_pump.mouse_state().x() as f32 / self.real_scale,
             self.sdl_event_pump.mouse_state().y() as f32 / self.real_scale,
         )
+    }
+
+    /// Scripted-input override for the mouse position (see
+    /// [`GraphicsContext::get_mouse_pos`]). Passing `None` disables the
+    /// override and hands control back to the real mouse.
+    pub fn set_scripted_mouse_pos(&mut self, pos: Option<gfx::FloatPos>) {
+        self.scripted_mouse_pos = pos;
+    }
+
+    /// Injects a synthetic event into the event stream so the whole game
+    /// (menus, chat, inventory, world handlers) behaves exactly as if it came
+    /// from the SDL pump. Key events additionally update the held-key state
+    /// map, mirroring `get_events`' bookkeeping. Used by the scripted-play and
+    /// capture harness.
+    pub fn inject_event(&mut self, event: gfx::Event) {
+        if let gfx::Event::KeyPress(key, ..) = event {
+            self.set_key_state(key, true);
+        }
+        if let gfx::Event::KeyRelease(key, ..) = event {
+            self.set_key_state(key, false);
+        }
+        self.events_queue.push_back(event);
     }
 
     /// Gets key state
@@ -434,6 +473,14 @@ impl GraphicsContext {
         self.ms_so_far = 0.0;
     }
 
+    /// Sets the UI zoom to `scale` and cancels the animated easing used by
+    /// `update_window`, so it takes effect on the very next frame. Capture runs
+    /// use this to make window-size math deterministic from frame 0.
+    pub fn set_scale_immediate(&mut self, scale: f32) {
+        self.scale = scale;
+        self.real_scale = scale;
+    }
+
     pub fn disable_fps_limit(&mut self) {
         self.min_ms_per_frame = 0.0;
     }
@@ -443,6 +490,53 @@ impl GraphicsContext {
         if let Err(error) = self.video_subsystem.gl_set_swap_interval(swap_interval) {
             println!("Error setting VSync: {error}");
         }
+    }
+
+    /// Reads back the last completed frame from the offscreen FBO texture and
+    /// writes it to `path` as a PNG. This is the frame-capture harness
+    /// capture point: it can be called at any moment the GL context is current,
+    /// and does not disturb the render pipeline.
+    ///
+    /// The FBO texture is created with `GL_BGRA` upload ordering, so pixels are
+    /// read back in BGRA byte order and re-ordered for the PNG.
+    pub fn capture_frame_to_png(&self, path: &std::path::Path) -> Result<()> {
+        let width = self.sdl_window.size().0 as i32;
+        let height = self.sdl_window.size().1 as i32;
+
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, self.window_framebuffer);
+            gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, self.window_texture, 0);
+            gl::ReadPixels(0, 0, width, height, gl::BGRA, gl::UNSIGNED_BYTE, pixels.as_mut_ptr().cast());
+        }
+        // leave the framebuffer state exactly as update_window() expects it
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, self.window_framebuffer);
+        }
+
+        // flip vertically (GL origin bottom-left) and convert BGRA -> RGBA
+        let mut rgba = vec![0u8; pixels.len()];
+        let stride = (width * 4) as usize;
+        for y in 0..height as usize {
+            let src_row = &pixels[(height as usize - 1 - y) * stride..][..stride];
+            let dst_row = &mut rgba[y * stride..][..stride];
+            for x in 0..width as usize {
+                dst_row[x * 4] = src_row[x * 4 + 2];
+                dst_row[x * 4 + 1] = src_row[x * 4 + 1];
+                dst_row[x * 4 + 2] = src_row[x * 4];
+                dst_row[x * 4 + 3] = src_row[x * 4 + 3];
+            }
+        }
+
+        let file = std::fs::File::create(path)?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(&rgba)?;
+
+        Ok(())
     }
 }
 

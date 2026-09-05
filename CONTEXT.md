@@ -6,11 +6,59 @@
 > source. Git is the source of truth for code; this file is the source of truth
 > for *what the human wants next*. Keep it lean — it's a handoff, not a changelog.
 
-_Last updated: 2026-09-04 (Tier 1 numeric test harness: sim trace + dump)_
+_Last updated: 2026-09-04 (frame-capture + scripted-play harness, mostly working)_
 
 ---
 
 ## Next Up
+
+- **CAPTURE/SCRIPT HARNESS (Tier 2) — built this session, uncommitted.** All change is in
+  git working tree; git identity is unset in this repo, so commits were left for the user.
+  What works, verified with real captures (agent-reviewed PNGs):
+  - `client --test [--hidden] --capture <dir> [--capture-frames N] [--capture-interval N]
+    [--capture-duration ms] [--script <file>]`: skips menus, boots the in-process
+    singleplayer server on a harness-owned flat seed-123 world
+    (`CaptureWorlds/capture.world`, deleted fresh each run; never touches real saves),
+    captures rendered frames via GL FBO ReadPixels → PNG + `manifest.txt`.
+  - Script DSL (`client/game/script.rs`, see `test_scripts/smoke.script`): `wait`, `press`,
+    `chat` (handles the chat anti-echo guard via a `TextInput("")` sentinel), `move`,
+    `tp` (client-side teleport; server `/tp` is correctly overridden by client-adopted
+    positions), `worldclick`, `shot`, `exit`.
+  - Determinism: capture runs disable fps limiter/vsync, pin `real_scale`, and advance
+    the sim by a fixed 4 sub-ticks/frame (`FramerateMeasurer` deterministic mode).
+  - New server command `/setblock <block> <x> <y>` (base_game/commands.lua).
+  - Scratch diagnostics (env-gated, harmless): `CAPTURE_WORLD=<path> cargo test
+    dump_capture_world_rows` decodes a .world save and prints a row profile — this
+    decoded the coordinate system (see below).
+  - **Coordinate reference (decoded): positions are in block units as f32**; the flat
+    test world is 512×256 *blocks*, ground top row = **y=180**, player height 3 blocks,
+    default spawn (256,170); `RENDER_BLOCK_WIDTH=16` px/unit × `real_scale` (~2) on screen.
+  - **Coordinate reference (decoded): positions are in block units as f32**; the flat
+    test world is 512×256 *blocks*, ground top row = **y=180**, player height 3 blocks,
+    default spawn (256,170); `RENDER_BLOCK_WIDTH=16` px/unit × `real_scale` (~2) on screen.
+- **OPEN BUG (first task next session):**
+  - ~~`/setblock` mutates nothing~~ **RESOLVED (2026-09-05): it works.** Root causes,
+    both in my own harness, not the game:
+    1. `run_capture_client` spawned a *second* private server (that one saved a
+       pristine world over the played one at shutdown) — fixed by letting
+       `PrivateWorld::new` own the server thread exclusively;
+    2. the chat anti-echo guard (`waiting_for_t`) ate the first injected `TextInput` —
+       fixed by sending a sentinel `TextInput("")` first (mirrors real typing);
+    3. the capture loop exited at window-close, killing the server thread before its
+       world save — fixed by pumping the menu stack until `should_close()` (the
+       shutdown/save happens in stack updates after the window closes).
+  - Verified by save-dump: `/setblock stone 16 5` persisted (`id12 at (16,5)` in
+    `capture.world`); earlier "invisible stone" readings were reading rows 150-256
+    and the block was at row 5 (world y=0 is the sky, 180 the ground).
+  - **worldclick** got an adaptive steering loop in `core_client.rs` (`world_click_steering`):
+    the script parks the mouse override near the target; the game loop nuzzles it until
+    `BlockSelector::get_selected_block` matches the requested block, then injects
+    press/release — immune to any residual world-unit mapping drift. Still needs one
+    confirmed end-to-end block *break*test; screen-coords mouse override + menu clicks
+    are verified working (red outline test).
+  - Chat replies/commands fully verified round-trip ("Unknown command", "Set block").
+
+
 
 - **Entities — zombies.** First non-player entity is in: a procedural, code-drawn
   zombie that walks back and forth across the flat test world (name `"test"`, seed `123`),

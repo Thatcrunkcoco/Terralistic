@@ -2,12 +2,12 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::Result;
 
-use crate::client::game::core_client::run_game;
+use crate::client::game::core_client::{run_game, RunGameExtras};
+
 use crate::client::global_settings::GlobalSettings;
 use crate::client::menus::{LoadingScreen, Menu};
 use crate::client::settings::Settings;
@@ -15,7 +15,7 @@ use crate::libraries::graphics as gfx;
 use crate::server::server_core::Server;
 use crate::server::server_core::SINGLEPLAYER_PORT;
 
-fn start_private_world_server(world_path: &Path, seed: u64, world_name: String) -> Result<(std::thread::JoinHandle<std::result::Result<(), anyhow::Error>>, Arc<AtomicBool>, Arc<Mutex<String>>)> {
+pub fn start_private_world_server(world_path: &Path, seed: u64, world_name: String) -> Result<(std::thread::JoinHandle<std::result::Result<(), anyhow::Error>>, Arc<AtomicBool>, Arc<Mutex<String>>)> {
     let server_running = Arc::new(AtomicBool::new(true));
     let server_running2 = server_running.clone();
 
@@ -57,11 +57,12 @@ pub struct PrivateWorld {
     settings: Rc<RefCell<Settings>>,
     global_settings: Rc<RefCell<GlobalSettings>>,
     debug: bool,
+    extras: RunGameExtras,
 }
 
 impl PrivateWorld {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(world_path: &Path, seed: u64, world_name: String, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>, debug: bool) -> Result<Self> {
+    pub fn new(world_path: &Path, seed: u64, world_name: String, settings: Rc<RefCell<Settings>>, global_settings: Rc<RefCell<GlobalSettings>>, debug: bool, extras: RunGameExtras) -> Result<Self> {
         let (server_thread, server_running, loading_text) = start_private_world_server(world_path, seed, world_name)?;
         Ok(Self {
             server_thread: Some(server_thread),
@@ -71,6 +72,7 @@ impl PrivateWorld {
             settings,
             global_settings,
             debug,
+            extras,
         })
     }
 }
@@ -107,7 +109,16 @@ impl Menu for PrivateWorld {
             PrivateWorldState::Loading => {
                 self.state = PrivateWorldState::Playing;
                 if self.server_running.load(Ordering::Relaxed) {
-                    let res = run_game(graphics, SINGLEPLAYER_PORT, String::from("127.0.0.1"), "_", &self.settings, &self.global_settings, self.debug);
+                    let res = run_game(
+                        graphics,
+                        SINGLEPLAYER_PORT,
+                        String::from("127.0.0.1"),
+                        "_",
+                        &self.settings,
+                        &self.global_settings,
+                        self.debug,
+                        self.extras.clone(),
+                    );
 
                     if let Err(e) = res {
                         println!("{e}");

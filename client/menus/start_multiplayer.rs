@@ -68,7 +68,7 @@ impl Menu for StartMultiplayer {
             }
             MultiplayerState::NameMenu => {
                 self.state = MultiplayerState::Playing;
-                let game_result = run_game(graphics, self.server.port, self.server.ip.clone(), &self.player_name.take()?, &self.settings, &self.global_settings, false);
+                let game_result = run_game(graphics, self.server.port, self.server.ip.clone(), &self.player_name.take()?, &self.settings, &self.global_settings, false, crate::client::game::core_client::RunGameExtras::default());
                 if let Err(error) = game_result {
                     println!("Game error: {error}");
                     self.state = MultiplayerState::ErrorMenu;

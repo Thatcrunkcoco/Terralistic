@@ -34,9 +34,25 @@ use super::background::Background;
 use super::block_selector::BlockSelector;
 use super::blocks::ClientBlocks;
 use super::camera::Camera;
+use super::capture::FrameCapture;
 use super::mod_manager::ClientModManager;
 use super::networking::ClientNetworking;
+use super::script::ScriptDriver;
 use super::walls::ClientWalls;
+
+/// Optional harness configuration threaded through `run_game` by PrivateWorld.
+/// Empty (default) in normal play; with capture/script content set the loop
+/// runs scripted input + frame capture and ticks deterministically.
+#[allow(clippy::struct_field_names)]
+#[derive(Debug, Default, Clone)]
+pub struct RunGameExtras {
+    pub script_path: Option<String>,
+    pub capture_dir: Option<String>,
+    /// capture every Nth rendered frame; 0 disables cadence captures
+    pub capture_interval: u32,
+    pub capture_max_frames: Option<u32>,
+    pub capture_timeout_ms: Option<u64>,
+}
 
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
@@ -48,7 +64,9 @@ pub fn run_game(
     settings: &Rc<RefCell<Settings>>,
     global_settings: &Rc<RefCell<GlobalSettings>>,
     debug: bool,
+    extras: RunGameExtras,
 ) -> Result<()> {
+    let deterministic = extras.capture_dir.is_some() || extras.script_path.is_some();
     // load base game mod
     let mut pre_events = EventManager::new();
     let mut networking = ClientNetworking::new(server_port, server_address);
@@ -118,7 +136,7 @@ pub fn run_game(
     let mut gas_overlay = Overlay::new(debug);
     let mut substance_renderer = SubstanceRenderer::new();
     let mut zombies = ClientZombies::new();
-    let mut framerate_measurer = FramerateMeasurer::new();
+    let mut framerate_measurer = FramerateMeasurer::new(deterministic);
     let mut chat = ClientChat::new(graphics);
     let mut health = ClientHealth::new();
     let mut floating_text = FloatingTextManager::new();
@@ -145,10 +163,79 @@ pub fn run_game(
     // print the time it took to initialize
     println!("Game joined in {}ms", timer.elapsed().as_millis());
 
+    // Harness (capture/script) setup. Deterministic runs drop the fps
+    // limiter and vsync (frames run as fast as they render), cancel the
+    // real_scale easing so window-size math is stable from frame 0, and
+    // advance the sim by a fixed number of sub-ticks per frame.
+    let mut script_driver = extras.script_path.as_ref().map(|path| ScriptDriver::from_file(path)).transpose()?;
+    let mut capture = extras.capture_dir.as_ref().map(|dir| FrameCapture::new(dir, extras.capture_interval, extras.capture_max_frames));
+    if deterministic {
+        graphics.disable_fps_limit();
+        graphics.enable_vsync(false);
+        graphics.set_scale_immediate(graphics.real_scale());
+    }
+    let run_started = std::time::Instant::now();
+    // (spec, pressed, started while pressing)
+    let mut world_click_steering: Option<(super::script::WorldClickSpec, bool, std::time::Instant)> = None;
+
     'main_loop: while graphics.is_window_open() {
         framerate_measurer.update();
 
         let frame_timer = std::time::Instant::now();
+
+        // Scripted play: pump the driver *before* the event drain so events
+        // it injects land in this very frame. It needs the camera position
+        // (of the previous frame) for world-click resolution.
+        let mut script_status = if let Some(driver) = script_driver.as_mut() {
+            let camera_pos = camera.get_position();
+            let status = driver.update(graphics, camera_pos.0, camera_pos.1)?;
+            // client-side teleport: move the main player's position directly;
+            // the server adopts client-reported positions so this sticks
+            if let Some((x, y)) = status.tp {
+                if let Some(main_player) = players.get_main_player() {
+                    let mut entities_lock = entities.get_entities();
+                    if let Ok(position_component) = entities_lock.ecs.query_one_mut::<&mut PositionComponent>(main_player) {
+                        position_component.set_x(x);
+                        position_component.set_y(y);
+                    }
+                    if let Ok(physics_component) = entities_lock.ecs.query_one_mut::<&mut crate::shared::entities::PhysicsComponent>(main_player) {
+                        physics_component.velocity_x = 0.0;
+                        physics_component.velocity_y = 0.0;
+                    }
+                }
+            }
+            status
+        } else {
+            super::script::ScriptStatus::default()
+        };
+
+        // Scripted world click steering: the script moves the mouse override
+        // near the target block; each frame nudge it until the block selector
+        // actually selects the target, then inject the press/release. This is
+        // immune to any world<->screen unit drift because it closes on the
+        // same math the game itself uses to resolve clicks.
+        if let Some(spec) = script_status.world_click.take() {
+            world_click_steering = Some((spec, false, std::time::Instant::now()));
+        }
+        if let Some((spec, pressed, started)) = &mut world_click_steering {
+            if !*pressed {
+                let selected = BlockSelector::get_selected_block(graphics, &camera);
+                let err_x = spec.block_x as f32 - selected.0 as f32;
+                let err_y = spec.block_y as f32 - selected.1 as f32;
+                if err_x.abs() < 0.9 && err_y.abs() < 0.9 {
+                    graphics.inject_event(gfx::Event::KeyPress(spec.button, false));
+                    *pressed = true;
+                } else {
+                    let render_block_width = crate::shared::blocks::RENDER_BLOCK_WIDTH;
+                    spec.mouse_x += err_x * render_block_width;
+                    spec.mouse_y += err_y * render_block_width;
+                    graphics.set_scripted_mouse_pos(Some(gfx::FloatPos(spec.mouse_x, spec.mouse_y)));
+                }
+            } else if started.elapsed().as_millis() as u64 >= spec.hold_ms {
+                graphics.inject_event(gfx::Event::KeyRelease(spec.button, false));
+                world_click_steering = None;
+            }
+        }
 
         while let Some(event) = graphics.get_event() {
             events.push_event(events::Event::new(event));
@@ -259,6 +346,33 @@ pub fn run_game(
         framerate_measurer.update_post_render();
 
         graphics.update_window();
+
+        let script_shot = script_status.shot;
+        if script_status.exit {
+            graphics.close_window();
+        }
+
+        if let Some(capture) = capture.as_mut() {
+            capture.try_capture(graphics, script_shot)?;
+            if capture.is_done() {
+                capture.write_manifest()?;
+                graphics.close_window();
+            }
+        }
+
+        if let Some(timeout) = extras.capture_timeout_ms {
+            if run_started.elapsed().as_millis() as u64 >= timeout {
+                if let Some(capture) = capture.as_ref() {
+                    capture.write_manifest()?;
+                }
+                graphics.close_window();
+            }
+        }
+    }
+
+    if let Some(capture) = capture {
+        capture.write_manifest()?;
+        println!("Captured {} frames", capture.frames_taken());
     }
 
     lights.stop(settings)?;

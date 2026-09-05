@@ -160,3 +160,28 @@ end
 function describe_command_test()
     return "Lists the test sections and where to find them."
 end
+function command_setblock(arguments, executor)
+    if #arguments ~= 3 then
+        return "Usage: setblock <block name> <x> <y> - coordinates in block units"
+    end
+
+    x = tonumber(arguments[2])
+    y = tonumber(arguments[3])
+    if x == nil or y == nil then
+        return "Arguments 2 and 3 must be numbers."
+    end
+
+    block_id = terralistic_get_block_id_by_name(arguments[1])
+    if block_id == nil then
+        return "Block '" .. arguments[1] .. "' not found."
+    end
+
+    terralistic_set_block(x, y, block_id)
+    return "Set block"
+end
+
+function describe_command_setblock()
+    return [[Sets a world block directly.
+Usage: setblock <block name> <x> <y> - coordinates in block units.
+Test-harness helper for scripted visual scenes.]]
+end

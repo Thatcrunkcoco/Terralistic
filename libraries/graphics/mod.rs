@@ -65,5 +65,27 @@ pub fn init(
     default_mono_font_data: Option<&[u8]>,
     terminal_font_data: Option<(&'static [u8], f32, f32)>,
 ) -> Result<GraphicsContext> {
-    GraphicsContext::new(window_width, window_height, window_title, default_font_data, default_mono_font_data, terminal_font_data)
+    init_with_options(
+        window_width,
+        window_height,
+        window_title,
+        default_font_data,
+        default_mono_font_data,
+        terminal_font_data,
+        false,
+    )
+}
+
+/// Same as [`init`], but also lets the frame-capture / scripted-play harness
+/// request a hidden (offscreen-like) window.
+pub fn init_with_options(
+    window_width: u32,
+    window_height: u32,
+    window_title: &str,
+    default_font_data: &[u8],
+    default_mono_font_data: Option<&[u8]>,
+    terminal_font_data: Option<(&'static [u8], f32, f32)>,
+    hidden_window: bool,
+) -> Result<GraphicsContext> {
+    GraphicsContext::new(window_width, window_height, window_title, default_font_data, default_mono_font_data, terminal_font_data, hidden_window)
 }
