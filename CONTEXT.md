@@ -6,57 +6,49 @@
 > source. Git is the source of truth for code; this file is the source of truth
 > for *what the human wants next*. Keep it lean — it's a handoff, not a changelog.
 
-_Last updated: 2026-09-04 (frame-capture + scripted-play harness, mostly working)_
+_Last updated: 2026-09-05 (test harness Tiers 1+2 complete & validated; next: feature work)_
 
 ---
 
+## Standing Rules
+
+- **AGENTIC IMAGE BUDGET (hard provider limit):** the model provider rejects any
+  request with **more than 30 images total in conversation history** — and images stay
+  in history, so overshooting bricks the session permanently (hit 2026-09-05 fixing it).
+  When using screenshot/frame diagnostics (`--capture`, frame dumps, PPM/PNG sheet
+  dumps, `Read` on images), budget images: review the **fed frame or one-to-few sampled
+  frames** (e.g. every 10th), delete consumed frame files from disk, and prefer
+  numeric probes (`CAPTURE_WORLD`/`CAPTURE_PROBE`, trace CSV, `--dump`) over visual
+  checks. Never `Read` whole frame batches.
+
 ## Next Up
 
-- **CAPTURE/SCRIPT HARNESS (Tier 2) — built this session, uncommitted.** All change is in
-  git working tree; git identity is unset in this repo, so commits were left for the user.
-  What works, verified with real captures (agent-reviewed PNGs):
-  - `client --test [--hidden] --capture <dir> [--capture-frames N] [--capture-interval N]
-    [--capture-duration ms] [--script <file>]`: skips menus, boots the in-process
-    singleplayer server on a harness-owned flat seed-123 world
-    (`CaptureWorlds/capture.world`, deleted fresh each run; never touches real saves),
-    captures rendered frames via GL FBO ReadPixels → PNG + `manifest.txt`.
-  - Script DSL (`client/game/script.rs`, see `test_scripts/smoke.script`): `wait`, `press`,
-    `chat` (handles the chat anti-echo guard via a `TextInput("")` sentinel), `move`,
-    `tp` (client-side teleport; server `/tp` is correctly overridden by client-adopted
-    positions), `worldclick`, `shot`, `exit`.
+- **Test harness (Tiers 1+2) — DONE & VALIDATED (2026-09-05).** Full recipes in
+  `TESTING.md` (read it before planning any test/validation work). Summary:
+  - Tier 1 numeric: `server --nogui --test --trace <csv> --trace-ms N --dump <json>
+    --duration <virtual_ms>` — entity trajectories + gas fnv totals/checksums; sim-flag
+    runs use `server_data/trace.world`, never the real multiplayer world.
+  - Tier 2 visual/scripted: `cargo run -- client --test --hidden --capture <dir>
+    [--capture-frames N] [--capture-interval N] [--capture-duration ms] [--script <f>]`
+    — skips menus, boots a harness-owned in-process server on the flat seed-123 world
+    (`CaptureWorlds/capture.world`, deleted fresh each run), captures GL FBO frames →
+    PNG + manifest, drives `--script` DSL: `wait / press / move / chat (auto-Escape +
+    anti-echo sentinel) / tp (client-side; server /tp is overridden by client positions)
+    / worldclick (adaptive steering onto the block selector; end-to-end break verified:
+    pickaxe → start/stop packets → block removed in save) / shot / exit`.
   - Determinism: capture runs disable fps limiter/vsync, pin `real_scale`, and advance
-    the sim by a fixed 4 sub-ticks/frame (`FramerateMeasurer` deterministic mode).
-  - New server command `/setblock <block> <x> <y>` (base_game/commands.lua).
-  - Scratch diagnostics (env-gated, harmless): `CAPTURE_WORLD=<path> cargo test
-    dump_capture_world_rows` decodes a .world save and prints a row profile — this
-    decoded the coordinate system (see below).
-  - **Coordinate reference (decoded): positions are in block units as f32**; the flat
-    test world is 512×256 *blocks*, ground top row = **y=180**, player height 3 blocks,
-    default spawn (256,170); `RENDER_BLOCK_WIDTH=16` px/unit × `real_scale` (~2) on screen.
-  - **Coordinate reference (decoded): positions are in block units as f32**; the flat
-    test world is 512×256 *blocks*, ground top row = **y=180**, player height 3 blocks,
-    default spawn (256,170); `RENDER_BLOCK_WIDTH=16` px/unit × `real_scale` (~2) on screen.
-- **OPEN BUG (first task next session):**
-  - ~~`/setblock` mutates nothing~~ **RESOLVED (2026-09-05): it works.** Root causes,
-    both in my own harness, not the game:
-    1. `run_capture_client` spawned a *second* private server (that one saved a
-       pristine world over the played one at shutdown) — fixed by letting
-       `PrivateWorld::new` own the server thread exclusively;
-    2. the chat anti-echo guard (`waiting_for_t`) ate the first injected `TextInput` —
-       fixed by sending a sentinel `TextInput("")` first (mirrors real typing);
-    3. the capture loop exited at window-close, killing the server thread before its
-       world save — fixed by pumping the menu stack until `should_close()` (the
-       shutdown/save happens in stack updates after the window closes).
-  - Verified by save-dump: `/setblock stone 16 5` persisted (`id12 at (16,5)` in
-    `capture.world`); earlier "invisible stone" readings were reading rows 150-256
-    and the block was at row 5 (world y=0 is the sky, 180 the ground).
-  - **worldclick** got an adaptive steering loop in `core_client.rs` (`world_click_steering`):
-    the script parks the mouse override near the target; the game loop nuzzles it until
-    `BlockSelector::get_selected_block` matches the requested block, then injects
-    press/release — immune to any residual world-unit mapping drift. Still needs one
-    confirmed end-to-end block *break*test; screen-coords mouse override + menu clicks
-    are verified working (red outline test).
-  - Chat replies/commands fully verified round-trip ("Unknown command", "Set block").
+    the sim by a fixed 4 sub-ticks/frame. Server still ticks wall-clock ⇒ captures are
+    visually stable but NOT bit-exact (golden frames remain a stretch goal).
+  - Numeric probes grabbed with bash, not images: `CAPTURE_WORLD=... CAPTURE_PROBE="x,y
+    x,y" [CAPTURE_COLUMN=x] cargo test dump_world_save -- --nocapture` decodes any .world
+    save. Smoke gate: `cargo test --quiet` (96 tests) + the `test_scripts/smoke.script`
+    run (7 frames, chat/command round-trip, teleport, walk, place+mine) — all green.
+  - Scene tools: `/setblock <name> <x> <y>` server command; test-world gas box right of
+    spawn, second liquid box further right. Coordinate reference: position units =
+    1/16 block (spawn 256,170 = block 16, ground row 180); screen px = units ×
+    `real_scale` (~2); `RENDER_BLOCK_WIDTH=16`.
+  - Known benign: shutdown can log "Failed to send packet ... Resource not found" as
+    the client disconnects first — harmless (chat reply racing teardown).
 
 
 
@@ -109,15 +101,12 @@ _Last updated: 2026-09-04 (frame-capture + scripted-play harness, mostly working
   - **Bit-exact golden-state tests** need a deterministic stepping loop (today sub-ticks
     fill from wall clock, so cross-run/cross-machine dumps differ slightly near the stop
     edge). In-process nogui `Server` golden tests are the stretch goal.
-- **Zombie bake fixes (visual round):** exposed via a new agent sheet-inspection
-  hook —`CAPTURE_SHEET=<dir> cargo test dump_zombie_sheet` writes the full 16-frame
+- **Zombie bake fixes (visual round):** exposed via an agent sheet-inspection
+  hook — `CAPTURE_SHEET=<dir> cargo test dump_zombie_sheet` writes the full 16-frame
   walk strip as PPM at 8x zoom, which the agent reads/converts to PNG and reviews. Fixed:
   straight-alpha partial-coverage compositing (no more gray ghosting), feet anchored to
   their legs (was sliding out from under), leg swing 3→2 (stays under torso), arms now
   pump vertically at fixed x in opposite phase (horizontal slide detached them).
-- **Capture harness (next milestone):** frame-capture mode (hidden window,
-  png crate, CLI camera) → scripted keyboard play → mouse actions later. Screenshots /
-  your video drops also feed my multimodal analysis in-session.
 
 ## Decisions
 

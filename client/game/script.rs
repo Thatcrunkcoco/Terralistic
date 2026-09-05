@@ -13,6 +13,7 @@ use crate::libraries::graphics as gfx;
 const CHAT_OPEN_DELAY_MS: u64 = 60;
 const CHAT_CHAR_DELAY_MS: u64 = 15;
 const CHAT_ENTER_DELAY_MS: u64 = 60;
+const CHAT_ESC_DELAY_MS: u64 = 40;
 
 /// What the driver wants the game loop to do this frame.
 #[derive(Default)]
@@ -177,6 +178,10 @@ impl ScriptDriver {
                     self.inject_at(CHAT_OPEN_DELAY_MS + 2 * CHAT_CHAR_DELAY_MS, gfx::Event::TextInput(text));
                     self.inject_at(CHAT_OPEN_DELAY_MS + 2 * CHAT_CHAR_DELAY_MS + CHAT_ENTER_DELAY_MS, gfx::Event::KeyPress(gfx::Key::Enter, false));
                     self.inject_at(CHAT_OPEN_DELAY_MS + 2 * CHAT_CHAR_DELAY_MS + CHAT_ENTER_DELAY_MS + 1, gfx::Event::KeyRelease(gfx::Key::Enter, false));
+                    // the chat box stays open after sending; close it with
+                    // Escape so it stops consuming all later input events
+                    self.inject_at(CHAT_OPEN_DELAY_MS + 2 * CHAT_CHAR_DELAY_MS + CHAT_ENTER_DELAY_MS + CHAT_ESC_DELAY_MS, gfx::Event::KeyPress(gfx::Key::Escape, false));
+                    self.inject_at(CHAT_OPEN_DELAY_MS + 2 * CHAT_CHAR_DELAY_MS + CHAT_ENTER_DELAY_MS + CHAT_ESC_DELAY_MS + 1, gfx::Event::KeyRelease(gfx::Key::Escape, false));
                     status.shot = true;
                 }
                 ScriptAction::WorldClick { block_x, block_y, button, hold_ms } => {

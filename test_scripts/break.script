@@ -1,0 +1,13 @@
+# scripted end-to-end break validation:
+# select pickaxe, place a stone, mine it, verify via /setblock probe later
+wait 500
+chat /setblock stone 36 179
+wait 1000
+press 1 30
+wait 300
+worldclick 36 179 left 4000
+wait 1500
+shot
+wait 1500
+shot
+exit

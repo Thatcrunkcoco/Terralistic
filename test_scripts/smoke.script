@@ -1,16 +1,19 @@
-# scripted-play smoke test: teleport, screenshot, walk, break a block
+# smoke test: the validated harness action set, in a realistic order.
+# Run: cargo run -- client --test --hidden --script test_scripts/smoke.script \
+#        --capture /tmp/terralistic_smoke --capture-frames 10 --capture-interval 0
 wait 500
-chat /tp 300 120
-wait 600
+chat /pos                       # chat round-trip (reply appears as a chat line)
+wait 1200
 shot
-chat /pos
-wait 600
-press d 1500
-wait 700
-shot
-worldclick 316 130 left 2000
+chat /setblock stone 36 179     # place a block in the open, right of spawn
 wait 800
+press 1 30                      # select hotbar slot 1 = pickaxe (stone needs it)
+wait 300
+worldclick 36 179 left 4000     # mine the placed stone (steering aligns itself)
+wait 1200
 shot
-press space 30
-wait 400
+tp 256 150                      # client-side teleport (camera shifts down a bit)
+wait 800
+press d 1500                    # walk right briefly
+shot
 exit
